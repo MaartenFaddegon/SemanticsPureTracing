@@ -1,0 +1,15 @@
+Name:           Semantics
+Version:        1.0
+License:        BSD3
+Author:         Maarten Faddegon
+Build-Type:     Simple
+Cabal-Version:  >= 1.10
+extra-source-files: README
+
+Executable Semantics-test
+  build-Depends:     base >= 4 && < 5, monads-tf, libgraph == 1.4
+  hs-source-dirs:    src
+  main-is:           Test.hs
+  other-modules:     Semantics
+  default-language:  Haskell2010
+  ghc-prof-options:  -auto-all
