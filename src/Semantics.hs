@@ -12,7 +12,6 @@ plus1Traced = Let ("plus1", Lambda "x"
                           $ Apply ( Push "plus1" 
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
-
 ex1 = prelude
     $ plus1Traced
     $ Print $ Apply (Var "plus1") "1"
@@ -461,11 +460,6 @@ data CompStmt
     , stmtUID    :: UID
     , stmtRepr   :: String
     }
- | IntermediateStmt
-    { stmtParent :: Parent
-    , stmtUID    :: UID
-    , stmtRepr   :: String
-    }
   deriving (Show,Eq,Ord)
 
 type UID = Int
@@ -535,65 +529,6 @@ dfsFold pre post z me tree
     (Just (AppEvent i _))       -> let z1 = dfsFold pre post z (lookup 1 cs) tree
                                        z2 = pre me z1 -- infix
                                    in       dfsFold pre post z2 (lookup 2 cs) tree
-{-
-successors :: Bool -> Trace -> Event -> CompStmt
-successors root trc rec = case rec of
-        (AppEvent _ _)    -> merge root rec $ (suc ArgOf) ++ (suc ResOf)
-        (LamEvent _ _)    -> merge root rec (suc $ flip Parent 0)
-        (RootEvent l s _) -> merge root rec (suc $ flip Parent 0)
-
-  where childEvents = map    (\c -> (parentUID . eventParent $ c, c))
-                    $ filter (\c -> eventUID rec == parentUID . eventParent $ c) trc
-
-        repr j = case lookup j childEvents of
-                        Nothing -> "_"
-                        
-                     
-
-        -- TODO: some kind of root detection for -> vs = ?
-        -- mkStmt (ConstEvent uid p repr _) = case rec of
-        --   (RootEvent _ _ _) -> IntermediateStmt p uid ("= " ++ repr)
-        --   _            -> IntermediateStmt p uid repr
-	-- mkStmt chd                     = (successors root' trc chd)
-	-- root' = case rec of (AppEvent _ _) -> False; _ -> root
--}
-
-oldestUID :: [UID] -> UID
-oldestUID = head . sort
-
-{-
-merge :: Bool -> Event -> [CompStmt] -> CompStmt
-
-merge _ (RootEvent lbl stk i) []    = CompStmt lbl stk i (lbl ++ " = _")
-merge _ (RootEvent lbl stk _) [chd] = CompStmt lbl stk i (lbl ++ " " ++ r)
-  where r = stmtRepr chd
-        i = stmtUID  chd
-merge _ (RootEvent lbl stk i) _     = error "merge: Root with multiple children?"
-
-merge _ (LamEvent i p) []   = IntermediateStmt p i "_"
-merge _ (LamEvent _ p) [a]  = IntermediateStmt p (stmtUID a) (stmtRepr a)
-merge _ (LamEvent _ p) apps = IntermediateStmt p i r
-  where (a:pps)     = map stmtRepr apps
-        r           = (foldl and ("{" ++ a) pps) ++ "}"
-        i           = head . sort . (map stmtUID) $ apps
-        and acc app = acc ++ "; " ++ app
-
-merge t (AppEvent appUID p) chds = case (length chds) of
-  0 -> IntermediateStmt p appUID (mkStmt "_" "_")
-  1 -> let res = head chds
-           r   = mkStmt "_" (stmtRepr res)
-           i   = stmtUID  res
-       in IntermediateStmt p i r
-  2 -> let [arg,res] = chds
-           r   = mkStmt (stmtRepr arg) (stmtRepr res)
-           i   = stmtUID res
-       in IntermediateStmt p i r
-  _ -> error "merge: Application with multiple arguments?"
-  where mkStmt arg res = pre ++ arg ++ inf ++ res ++ post
-        pre  = if t then "" else "(\\"
-        inf  = if t then " = " else " -> "
-        post = if t then "" else ")"
--}
 
 --------------------------------------------------------------------------------
 -- Debug
