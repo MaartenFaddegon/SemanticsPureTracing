@@ -8,6 +8,15 @@ import qualified Debug.Trace as Debug
 --------------------------------------------------------------------------------
 -- Examples
 
+plus1Traced = Let ("plus1", Lambda "x" 
+                          $ Apply ( Push "plus1" 
+                                  $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
+                                  ) "x")
+
+ex1 = prelude
+    $ plus1Traced
+    $ Print $ Apply (Var "plus1") "1"
+
 --------------------------------------------------------------------------------
 -- Expressions
 
@@ -26,13 +35,15 @@ data Expr = Lambda     Name Expr
           | Const      Int
           | Plus       Expr Expr
 
+          | Print      Expr
+
           | Exception  String
           deriving (Show,Eq)
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
 --
--- S | N
+-- N | S Expr
 --
 -- plus = \x y -> case x of N      -> y
 --                          (S x') -> plus x' (S y)
@@ -45,9 +56,18 @@ data Expr = Lambda     Name Expr
 --
 
 prelude :: Expr -> Expr
-prelude e = Let ("map", Lambda "f" $ Lambda "xs" 
+prelude e = Let ("plus", Lambda "x" $ Lambda "y"
+                       $ Case (Var "x")
+                              [ (Constr "N" [],     Var "y")
+                              , (Constr "S" ["m"], Let ("n", Constr "S" ["y"])
+                                                        $ Apply (Apply (Var "plus") "m") "n")
+                              ])
+          $ Let ("0", Constr "N" [])
+          $ Let ("1", Constr "S" ["0"])
+          $ Let ("2", Constr "S" ["1"])
+          $ Let ("map", Lambda "f" $ Lambda "xs" 
                       $ Case (Var "xs")
-                             [ (Constr "Nil" [],        Var "xs")
+                             [ (Constr "Nil" [], Var "xs")
                              , ( Constr "Con" ["h","t"]
                                , Let ("h'", Apply (Var "f") "h")
                                $ Let ("t'", Apply (Apply (Var "map") "f") "t")
@@ -67,6 +87,7 @@ data Context = Context { trace          :: !Trace
                        , reductionCount :: !Int
                        , reduceLog      :: ![String]
                        , freshVarNames  :: ![Int]
+                       , stdout         :: String
                        }
 
 doLog :: String -> State Context ()
@@ -76,15 +97,22 @@ doLog msg = do
   where showd 0 = " "
         showd n = '|' : showd (n-1)
 
+doPrint s = do
+    modify $ \cxt -> cxt{stdout = stdout cxt ++ s}
+
 evaluate' :: Expr -> (Expr,Trace,String)
-evaluate' redex = (reduct,trace cxt,foldl (++) "" . reverse . reduceLog $ cxt)
+evaluate' redex = ( reduct
+                  , trace cxt
+                  , (foldl (++) "" . reverse . reduceLog $ cxt)
+                    ++ "\nProgram output: " ++ stdout cxt
+                  )
   where (reduct,cxt) = runState (eval redex) state0
 
 evaluate :: Expr -> (Expr,Trace)
 evaluate redex = (reduct, trace cxt)
   where (reduct,cxt) = runState (eval redex) state0
 
-state0 = Context [] 0 [] [] 0 1 [] [1..]
+state0 = Context [] 0 [] [] 0 1 [] [1..] ""
 
 eval :: (Expr -> State Context Expr)
 eval expr = do 
@@ -96,6 +124,8 @@ eval expr = do
         d <- gets depth
         modify $ \cxt -> cxt{depth=d+1}
         doLog (show n ++ ": " ++ show expr)
+        -- h <- gets heap
+        -- doLog ("* with heap" ++ show (map fst h))
         reduct <- reduce expr
         modify $ \cxt -> cxt{depth=d}
         return reduct
@@ -123,8 +153,8 @@ lookupHeap :: Name -> State Context (Stack,Expr)
 lookupHeap x = do 
   me <- fmap (lookup x . heap) get
   case me of
-    Just (stk,Lambda y e) -> return (stk,Lambda y e)
-    _                     -> return ([],Exception ("Lookup '" ++ x ++ "' failed"))
+    Just (stk,e) -> return (stk,e)
+    _            -> return ([],Exception ("Lookup '" ++ x ++ "' failed in heap "))
 
 --------------------------------------------------------------------------------
 -- Stack handling: push and call
@@ -221,7 +251,7 @@ reduce (Push l e) = do
   doPush l
   uid <- getUniq
   doTrace (RootEvent l stk uid)
-  eval (Observed (Parent uid) e)
+  eval (Observed (Parent uid 0) e)
 
 reduce (Observed p e) = do
   stk <- gets stack
@@ -230,18 +260,25 @@ reduce (Observed p e) = do
     Exception msg ->
       return (Exception msg)
 
-    -- ObsC rule in paper
+    -- ObsC rule in PLDI paper
     (Const v) -> do
       uid <- getUniq
-      doTrace (ConstEvent uid p (show v))
+      doTrace (ConstEvent uid p (show v) 0)
       return e'
 
-    -- ObsL rule in paper
+    (Constr s ns) -> do
+      i <- getUniq
+      doTrace (ConstEvent i p s (length ns))
+      ms <- mapM getFreshVar ns
+      eval $ foldl (\e (m,n,j) -> Let (m, Observed (Parent i j) (Var n)) e)
+                   (Constr s ms) (zip3 ms ns [0..])
+
+    -- ObsL rule in PLDI paper
     (Lambda x e) -> do
       i <- getUniq
       doTrace (LamEvent i p)
       x1 <- getFreshVar x
-      return (Lambda x1 (FunObs x x1 (Parent i) e))
+      return (Lambda x1 (FunObs x x1 (Parent i 0) e))
 
     e -> 
       return (Exception $ "Observe undefined: " ++ show e)
@@ -263,10 +300,28 @@ reduce (Case e1 alts) = do
                        Nothing    -> return $ non_exh s
     _ -> return $ Exception "Case on a non-Constr expression"
     
-    where non_exh s             = Exception $ "Non-exhaustive patterns in Case :" ++ s
-          lookup s              = (Prelude.lookup s) 
-                                . (map $ \(Constr t ys,e)->(t,(Constr t ys,e)))
-          red ys (Constr s xs, e2) = return $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
+    where non_exh s                = Exception $ "Non-exhaustive patterns in Case :" ++ s
+          lookup s                 = (Prelude.lookup s) 
+                                   . (map $ \(Constr t ys,e)->(t,(Constr t ys,e)))
+          red ys (Constr s xs, e2) = eval $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
+
+reduce (Constr s xs) = return $ Constr s xs
+
+reduce (Print e) = do
+  e' <- eval e
+  case e' of
+        (Constr s ns) -> do
+          doPrint s
+          mapM_ printField ns
+          return e'
+        (Const i) -> do
+          doPrint (show i)
+          return e'
+        f -> return $ Exception ("Print non-constant " ++ show f)
+  where printField n = do
+          doPrint " ("
+          eval (Print (Var n))
+          doPrint ")"
 
 reduce (Plus e1 e2) = do
   e1' <- eval e1
@@ -287,10 +342,14 @@ subst n m (Lambda n' e)       = Lambda (sub n m n') (subst n m e)
 subst n m (Apply e n')        = Apply (subst n m e) (sub n m n')
 subst n m (Var n')            = Var (sub n m n')
 subst n m (Let (n',e1) e2)    = Let ((sub n m n'),(subst n m e1)) (subst n m e2)
-subst n m (Push l e)           = Push l (subst n m e)
+subst n m (Push l e)          = Push l (subst n m e)
 subst n m (Observed p e)      = Observed p (subst n m e)
 subst n m (FunObs n' n'' p e) = FunObs (sub n m n') (sub n m n'') p (subst n m e)
 subst n m (Plus e1 e2)        = Plus (subst n m e1) (subst n m e2)
+subst n m (Case e1 alts)      = Case (subst n m e1) 
+                              $ map (\(e2,e3) -> (subst n m e2, subst n m e3)) alts
+subst n m (Constr s ns)       = Constr s $ map (sub n m) ns
+subst n m (Print e)           = Print (subst n m e)
 
 sub :: Name -> Name -> Name -> Name
 sub n m n' = if n == n' then m else n'
@@ -325,7 +384,6 @@ fresh (Push l e) = do
   e' <- fresh e
   return (Push l e')
 
-
 fresh (Observed p e) = do
   e' <- fresh e
   return (Observed p e')
@@ -341,6 +399,25 @@ fresh (Plus e1 e2) = do
   e1' <- fresh e1
   e2' <- fresh e2
   return (Plus e1' e2')
+
+fresh (Constr s ns) =
+  return (Constr s ns)
+
+fresh (Case e1 alts) = do
+  let (e2s,e3s) = unzip alts
+  e1'  <- fresh e1
+  -- e2s' <- mapM fresh e2s ???                           <--- MF TODO, is this ok?
+  e3s' <- mapM fresh e3s
+  return $ Case e1 (zip e2s e3s')
+
+  where freshAlt (Constr s xs, e) = do
+          ys <- mapM getFreshVar xs
+          e' <- fresh $ foldl (\v (x,y) -> subst x y v) e (zip xs ys)
+          return (Constr s ys, e')
+
+fresh (Print e) = do
+  e' <- fresh e
+  return (Print e)
 
 getFreshVar :: Name -> State Context Name
 getFreshVar n = do
@@ -363,6 +440,7 @@ data Event
     { eventUID    :: UID
     , eventParent :: Parent
     , eventRepr   :: String
+    , eventLength :: Int
     }
   | LamEvent
     { eventUID    :: UID
@@ -390,7 +468,7 @@ data CompStmt
 
 type UID = Int
 
-data Parent = Parent UID | ArgOf UID | ResOf UID deriving (Show,Eq,Ord)
+data Parent = Parent UID Int | ArgOf UID | ResOf UID deriving (Show,Eq,Ord)
 
 getUniq :: State Context UID
 getUniq = do
@@ -415,11 +493,13 @@ mkStmts (reduct,trc) = (reduct,map (successors True chds) roots)
 successors :: Bool -> Trace -> Event -> CompStmt
 successors root trc rec = case rec of
         (AppEvent _ _) -> merge root rec $ (suc ArgOf) ++ (suc ResOf)
-        (LamEvent _ _) -> merge root rec (suc Parent)
-        (RootEvent l s _)   -> merge root rec (suc Parent)
+        (LamEvent _ _) -> merge root rec (suc $ flip Parent 0)
+        (RootEvent l s _) -> merge root rec (suc $ flip Parent 0)
 
-  where suc con = map mkStmt $ filter (\chd -> eventParent chd == con (eventUID rec)) trc
-        mkStmt (ConstEvent uid p repr) = case rec of
+  where suc con = map mkStmt $ filter (\chd -> eventParent chd === con (eventUID rec)) trc
+        (===) (Parent i _) (Parent j _) = i == j
+        (===) p q                       = p == q
+        mkStmt (ConstEvent uid p repr _) = case rec of
           (RootEvent _ _ _) -> IntermediateStmt p uid ("= " ++ repr)
           _            -> IntermediateStmt p uid repr
 	mkStmt chd                     = (successors root' trc chd)
@@ -501,11 +581,14 @@ mkArcs cs = callArcs ++ pushArcs
   where pushArcs = map (\[c1,c2]    -> Arc c1 c2 ()) ps 
         callArcs = foldl (\as [c1,c2,c3] -> (Arc c1 c2 ()) 
                                             : ((Arc c2 c3 ()) : as)) [] ts 
-        ps = filter (\[c1,c2]    -> pushDependency c1 c2)    (permutationsOfLength 2 cs)
+        ps = filter f2 (permutationsOfLength 2 cs)
         ts = filter f3 (permutationsOfLength 3 cs)
 
         f3 [c1,c2,c3] = callDependency c1 c2 c3
         f3 _          = False -- less than 3 statements
+
+        f2 [c1,c2]    = pushDependency c1 c2
+        f2 _          = False
 
 
 arcsFrom :: CompStmt -> [CompStmt] -> [Arc CompStmt ()]
@@ -546,8 +629,8 @@ callDependency2' pApp1 pApp2 pLam c = call pApp (nextStack pLam) == stmtStack c
 --------------------------------------------------------------------------------
 -- Evaluate and display.
 
-tracedEval :: Expr -> (Expr,CompGraph)
-tracedEval = mkGraph . mkStmts . evaluate
+-- tracedEval :: Expr -> (Expr,CompGraph)
+-- tracedEval = mkGraph . mkStmts . evaluate
 
 dispTxt :: Expr -> IO ()  
 dispTxt = disp' (putStrLn . shw)
@@ -575,7 +658,8 @@ showArc _  = ""
 disp' f expr = do
   putStrLn (messages ++ strc)
   -- Uncomment the next line to write all reduction steps to file (for off-line analysis).
-  -- writeFile "log" (messages ++ strc)
+  writeFile "log" (messages ++ strc)
   f . snd . mkGraph . mkStmts $ (reduct,trc)
   where (reduct,trc,messages) = evaluate' expr
-        strc = foldl (\acc s -> acc ++ "\n" ++ s) "\nEvent trace:" (map show $ reverse trc)
+        strc = "\n\nReduct: " ++ show reduct
+               ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
