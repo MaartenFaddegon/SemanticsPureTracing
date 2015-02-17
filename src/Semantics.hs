@@ -251,7 +251,7 @@ reduce (Push l e) = do
   doPush l
   uid <- getUniq
   doTrace (RootEvent l stk uid)
-  eval (Observed (Parent uid 0) e)
+  eval (Observed (Parent uid 1) e)
 
 reduce (Observed p e) = do
   stk <- gets stack
@@ -271,14 +271,14 @@ reduce (Observed p e) = do
       doTrace (ConstEvent i p s (length ns))
       ms <- mapM getFreshVar ns
       eval $ foldl (\e (m,n,j) -> Let (m, Observed (Parent i j) (Var n)) e)
-                   (Constr s ms) (zip3 ms ns [0..])
+                   (Constr s ms) (zip3 ms ns [1..])
 
     -- ObsL rule in PLDI paper
     (Lambda x e) -> do
       i <- getUniq
       doTrace (LamEvent i p)
       x1 <- getFreshVar x
-      return (Lambda x1 (FunObs x x1 (Parent i 0) e))
+      return (Lambda x1 (FunObs x x1 (Parent i 1) e))
 
     e -> 
       return (Exception $ "Observe undefined: " ++ show e)
@@ -288,8 +288,8 @@ reduce (FunObs x x1 p e) = do
       i  <- getUniq
       doTrace (AppEvent i p)
       x2 <- getFreshVar x
-      eval $ Let    (x2,Observed (ArgOf i) (Var x1)) 
-             {-in-} (Observed (ResOf i) (Apply (Lambda x e) x2))
+      eval $ Let    (x2,Observed (Parent i 1) (Var x1)) 
+             {-in-} (Observed (Parent i 2) (Apply (Lambda x e) x2))
 
 
 reduce (Case e1 alts) = do
@@ -468,7 +468,8 @@ data CompStmt
 
 type UID = Int
 
-data Parent = Parent UID Int | ArgOf UID | ResOf UID deriving (Show,Eq,Ord)
+data Parent = Parent {parentUID :: UID,  parentPosition :: Int} 
+              deriving (Show,Eq,Ord)
 
 getUniq :: State Context UID
 getUniq = do
@@ -484,30 +485,73 @@ doTrace rec = do
 --------------------------------------------------------------------------------
 -- Trace post processing
 
+-- Searchable mapping from UID of the parent and position in list of siblings
+-- to a child event.
+type EventTree = [(UID, [(Int, Event)])]
+
 mkStmts :: (Expr,Trace) -> (Expr,[CompStmt])
-mkStmts (reduct,trc) = (reduct,map (successors True chds) roots)
+mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
+
   where isRoot (RootEvent _ _ _) = True
-        isRoot _            = False
+        isRoot _                 = False
         (roots,chds) = partition isRoot trc
 
+        events :: EventTree
+        events = map children trc
+        children e = let j = eventUID e
+                     in (j, map    (\c -> (parentPosition . eventParent $ c, c))
+                          $ filter (\e -> j == (parentUID . eventParent) e) chds)
+
+mkStmt :: EventTree -> Event -> CompStmt
+mkStmt tree (e@(RootEvent l s i)) = CompStmt l s i r
+        where r = dfsFold f "" (Just e) tree
+              f Nothing                     = (++"_")
+              f (Just (RootEvent l _ _))    = (++l)
+              f (Just (ConstEvent _ _ r _)) = (++r)
+              f (Just (LamEvent _ _))       = (++"(->)")
+              f (Just (AppEvent _ _))       = id
+
+dfsFold :: (Maybe Event -> a -> a) -> a -> (Maybe Event) -> EventTree -> a
+dfsFold f z me tree 
+  = let z'     = f me z
+        cs     = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
+                                                                         Nothing   -> []
+                            Nothing  -> []
+        csFold = foldl(\z'' d -> dfsFold f z'' (lookup d cs) tree) z' 
+  in case me of
+    Nothing                     -> z'
+    (Just (RootEvent _ _ i))    -> csFold [1]
+    (Just (ConstEvent i _ _ l)) -> csFold [1..l]
+    (Just (LamEvent i _))       -> csFold [1]
+    (Just (AppEvent i _))       -> csFold [1,2]
+
+{-
 successors :: Bool -> Trace -> Event -> CompStmt
 successors root trc rec = case rec of
-        (AppEvent _ _) -> merge root rec $ (suc ArgOf) ++ (suc ResOf)
-        (LamEvent _ _) -> merge root rec (suc $ flip Parent 0)
+        (AppEvent _ _)    -> merge root rec $ (suc ArgOf) ++ (suc ResOf)
+        (LamEvent _ _)    -> merge root rec (suc $ flip Parent 0)
         (RootEvent l s _) -> merge root rec (suc $ flip Parent 0)
 
-  where suc con = map mkStmt $ filter (\chd -> eventParent chd === con (eventUID rec)) trc
-        (===) (Parent i _) (Parent j _) = i == j
-        (===) p q                       = p == q
-        mkStmt (ConstEvent uid p repr _) = case rec of
-          (RootEvent _ _ _) -> IntermediateStmt p uid ("= " ++ repr)
-          _            -> IntermediateStmt p uid repr
-	mkStmt chd                     = (successors root' trc chd)
-	root' = case rec of (AppEvent _ _) -> False; _ -> root
+  where childEvents = map    (\c -> (parentUID . eventParent $ c, c))
+                    $ filter (\c -> eventUID rec == parentUID . eventParent $ c) trc
+
+        repr j = case lookup j childEvents of
+                        Nothing -> "_"
+                        
+                     
+
+        -- TODO: some kind of root detection for -> vs = ?
+        -- mkStmt (ConstEvent uid p repr _) = case rec of
+        --   (RootEvent _ _ _) -> IntermediateStmt p uid ("= " ++ repr)
+        --   _            -> IntermediateStmt p uid repr
+	-- mkStmt chd                     = (successors root' trc chd)
+	-- root' = case rec of (AppEvent _ _) -> False; _ -> root
+-}
 
 oldestUID :: [UID] -> UID
 oldestUID = head . sort
 
+{-
 merge :: Bool -> Event -> [CompStmt] -> CompStmt
 
 merge _ (RootEvent lbl stk i) []    = CompStmt lbl stk i (lbl ++ " = _")
@@ -539,6 +583,7 @@ merge t (AppEvent appUID p) chds = case (length chds) of
         pre  = if t then "" else "(\\"
         inf  = if t then " = " else " -> "
         post = if t then "" else ")"
+-}
 
 --------------------------------------------------------------------------------
 -- Debug
@@ -651,7 +696,7 @@ showVertex' RootVertex  = "Root"
 showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
-showCompStmt (CompStmt l s i r) = r ++ " (with stack " ++ show s ++ ")"
+showCompStmt (CompStmt l s i r) = r -- ++ " (with stack " ++ show s ++ ")"
 
 showArc _  = ""
 
