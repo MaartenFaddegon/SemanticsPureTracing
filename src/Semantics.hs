@@ -504,27 +504,35 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
 
 mkStmt :: EventTree -> Event -> CompStmt
 mkStmt tree (e@(RootEvent l s i)) = CompStmt l s i r
-        where r = dfsFold f "" (Just e) tree
-              f Nothing                     = (++"_")
-              f (Just (RootEvent l _ _))    = (++l)
-              f (Just (ConstEvent _ _ r _)) = (++r)
-              f (Just (LamEvent _ _))       = (++"(->)")
-              f (Just (AppEvent _ _))       = id
+        where r = dfsFold pre post "" (Just e) tree
+              pre Nothing                     = (++" _")
+              pre (Just (RootEvent l _ _))    = (++l)
+              pre (Just (ConstEvent _ _ r _)) = (++" ("++r)
+              pre (Just (LamEvent _ _))       = (++" {")
+              pre (Just (AppEvent _ _))       = (++" ->")
+              post Nothing                     = id
+              post (Just (RootEvent l _ _))    = id
+              post (Just (ConstEvent _ _ r _)) = (++")")
+              post (Just (LamEvent _ _))       = (++" }")
+              post (Just (AppEvent _ _))       = id
 
-dfsFold :: (Maybe Event -> a -> a) -> a -> (Maybe Event) -> EventTree -> a
-dfsFold f z me tree 
-  = let z'     = f me z
+
+dfsFold :: (Maybe Event -> a -> a) -> (Maybe Event -> a -> a) -> a 
+        -> (Maybe Event) -> EventTree -> a
+dfsFold pre post z me tree 
+  = let z'     = pre me z
         cs     = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
                                                                          Nothing   -> []
                             Nothing  -> []
-        csFold = foldl(\z'' d -> dfsFold f z'' (lookup d cs) tree) z' 
-  in case me of
+        csFold = foldl(\z'' d -> dfsFold pre post z'' (lookup d cs) tree) z' 
+  in post me $ case me of
     Nothing                     -> z'
     (Just (RootEvent _ _ i))    -> csFold [1]
     (Just (ConstEvent i _ _ l)) -> csFold [1..l]
     (Just (LamEvent i _))       -> csFold [1]
-    (Just (AppEvent i _))       -> csFold [1,2]
-
+    (Just (AppEvent i _))       -> let z1 = dfsFold pre post z (lookup 1 cs) tree
+                                       z2 = pre me z1 -- infix
+                                   in       dfsFold pre post z2 (lookup 2 cs) tree
 {-
 successors :: Bool -> Trace -> Event -> CompStmt
 successors root trc rec = case rec of
