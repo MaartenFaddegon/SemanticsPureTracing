@@ -18,29 +18,6 @@ ex1 = prelude
     $ Print $ Apply (Var "plus1") "1"
 
 --------------------------------------------------------------------------------
--- Expressions
-
-data Expr = Lambda     Name Expr
-          | Apply      Expr Name
-          | Var        Name
-          | Let        (Name,Expr) Expr
-          | Constr     String [Name]
-          | Case       Expr [(Expr,Expr)]
-
-          | Push       Label Expr
-          | Observed   Parent Expr
-          | FunObs     Name Name Parent Expr
-          | ConsrObs   
-
-          | Const      Int
-          | Plus       Expr Expr
-
-          | Print      Expr
-
-          | Exception  String
-          deriving (Show,Eq)
-
---------------------------------------------------------------------------------
 -- Prelude, with:
 --
 -- N | S Expr
@@ -75,6 +52,31 @@ prelude e = Let ("plus", Lambda "x" $ Lambda "y"
                                )
                              ])
           $ e
+
+
+
+--------------------------------------------------------------------------------
+-- Expressions
+
+data Expr = Lambda     Name Expr
+          | Apply      Expr Name
+          | Var        Name
+          | Let        (Name,Expr) Expr
+          | Constr     String [Name]
+          | Case       Expr [(Expr,Expr)]
+
+          | Push       Label Expr
+          | Observed   Parent Expr
+          | FunObs     Name Name Parent Expr
+          | ConsrObs   
+
+          | Const      Int
+          | Plus       Expr Expr
+
+          | Print      Expr
+
+          | Exception  String
+          deriving (Show,Eq)
 
 --------------------------------------------------------------------------------
 -- The state
