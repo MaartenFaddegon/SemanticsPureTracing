@@ -551,7 +551,6 @@ mkStmt tree (e@(RootEvent l s i)) = CompStmt l s i r
               post (Just (LamEvent _ _))       = (++" }")
               post (Just (AppEvent _ _))       = id
 
-
 dfsFold :: (Maybe Event -> a -> a) -> (Maybe Event -> a -> a) -> a 
         -> (Maybe Event) -> EventTree -> a
 dfsFold pre post z me tree 
@@ -681,6 +680,7 @@ showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt l s i r) = r -- ++ " (with stack " ++ show s ++ ")"
+        ++ "\n with min-age " ++ show i
 
 showArc _  = ""
 
