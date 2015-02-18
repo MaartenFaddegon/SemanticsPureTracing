@@ -12,9 +12,21 @@ plus1Traced = Let ("plus1", Lambda "x"
                           $ Apply ( Push "plus1" 
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
-ex1 = prelude
-    $ plus1Traced
+mapTraced = Let ("mapTraced", Lambda "f" $ Lambda "xs" 
+                            $ Apply (Apply (Push "map" (Var "map")) "f") "xs")
+
+ex1 = {- import -} prelude
+    $ {- import -} plus1Traced
     $ Print $ Apply (Var "plus1") "1"
+
+ex2 = {- import -} prelude
+    $ {- import -} plus1Traced
+    $ {- import -} mapTraced
+    $ Let ("xs", Let ("c3", Constr "Nil" [])
+               $ Let ("c2", Constr "Con" ["3", "c3"])
+               $ Let ("c1", Constr "Con" ["2", "c2"])
+               $            Constr "Con" ["1", "c1"])
+    $ Print $ Apply (Apply (Var "mapTraced") "plus1") "xs"
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -28,19 +40,21 @@ ex1 = prelude
 --
 -- map = \f xs -> case xs of (Constr "Nil" [])    -> xs
 --                           (Constr "Con" [h,t]) -> let h' = f h, t' = map f t
---                                                  in Constr "Con" [h', t']
---
+--                                                   in Constr "Con" [h', t']
 
 prelude :: Expr -> Expr
 prelude e = Let ("plus", Lambda "x" $ Lambda "y"
                        $ Case (Var "x")
-                              [ (Constr "N" [],     Var "y")
+                              [ (Constr "O" [],     Var "y")
                               , (Constr "S" ["m"], Let ("n", Constr "S" ["y"])
                                                         $ Apply (Apply (Var "plus") "m") "n")
                               ])
-          $ Let ("0", Constr "N" [])
+          $ Let ("0", Constr "O" [])
           $ Let ("1", Constr "S" ["0"])
           $ Let ("2", Constr "S" ["1"])
+          $ Let ("3", Constr "S" ["2"])
+          $ Let ("4", Constr "S" ["3"])
+          $ Let ("5", Constr "S" ["4"])
           $ Let ("map", Lambda "f" $ Lambda "xs" 
                       $ Case (Var "xs")
                              [ (Constr "Nil" [], Var "xs")
@@ -317,6 +331,9 @@ reduce (Print e) = do
           return e'
         (Const i) -> do
           doPrint (show i)
+          return e'
+        (Exception s) -> do
+          doPrint $ "Exception: " ++ s
           return e'
         f -> return $ Exception ("Print non-constant " ++ show f)
   where printField n = do
