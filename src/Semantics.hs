@@ -26,7 +26,8 @@ ex2 = {- import -} prelude
                $ Let ("c2", Constr "Con" ["3", "c3"])
                $ Let ("c1", Constr "Con" ["2", "c2"])
                $            Constr "Con" ["1", "c1"])
-    $ Print $ Apply (Apply (Var "mapTraced") "plus1") "xs"
+    $ Print $ Let ("ys", Apply (Apply (Var "mapTraced") "plus1") "xs")
+                  $ Apply (Var "reverse") "ys"
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -41,6 +42,14 @@ ex2 = {- import -} prelude
 -- map = \f xs -> case xs of (Constr "Nil" [])    -> xs
 --                           (Constr "Con" [h,t]) -> let h' = f h, t' = map f t
 --                                                   in Constr "Con" [h', t']
+--
+-- foldl = \f z xs -> case xs of (Constr "Nil" [])    -> z
+--                               (Constr "Con" [h,t]) -> let z' = f z h
+--                                                       in foldl f z' t
+-- reverse = \xs -> let f = \z x -> Constr "Con" [x,z]
+--                      z = Constr "Nil" []
+--                  in foldl f z xs
+
 
 prelude :: Expr -> Expr
 prelude e = Let ("plus", Lambda "x" $ Lambda "y"
@@ -64,6 +73,19 @@ prelude e = Let ("plus", Lambda "x" $ Lambda "y"
                                $ Constr "Con" ["h'","t'"]
                                )
                              ])
+          $ Let ("foldl", Lambda "f" $ Lambda "z"  $ Lambda "xs"
+                        $ Case (Var "xs")
+                             [ (Constr "Nil" [], Var "z")
+                             , ( Constr "Con" ["h","t"]
+                               , Let ("z'", Apply (Apply (Var "f") "z") "h")
+                               $ Apply (Apply (Apply (Var "foldl") "f") "z'") "t"
+                               )
+                             ])
+          $ Let ("reverse", Lambda "xs"
+                          $ Let ("f", Lambda "z" $ Lambda "x"
+                                    $ Constr "Con" ["x","z"])
+                          $ Let ("z", Constr "Nil" [])
+                          $ Apply (Apply (Apply (Var "foldl") "f") "z") "xs")
           $ e
 
 
@@ -133,8 +155,8 @@ eval :: (Expr -> State Context Expr)
 eval expr = do 
   n <- gets reductionCount
   modify $ \s -> s {reductionCount = n+1}
-  if n > 500
-    then return (Exception "Giving up after 500 reductions.")
+  if n > 1000
+    then return (Exception "Giving up after 1000 reductions.")
     else do
         d <- gets depth
         modify $ \cxt -> cxt{depth=d+1}
