@@ -12,22 +12,52 @@ plus1Traced = Let ("plus1", Lambda "x"
                           $ Apply ( Push "plus1" 
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
-mapTraced = Let ("mapTraced", Lambda "f" $ Lambda "xs" 
-                            $ Apply (Apply (Push "map" (Var "map")) "f") "xs")
+
+-- data AB = A | B
+-- toggle :: AB -> AB
+toggle = Let ("toggle", Lambda "ab'" $ Apply (Push "toggle" $ Lambda "ab"
+                      $ Case (Var "ab")
+                             [ (Constr "A" [], Constr "B" [])
+                             , (Constr "B" [], Constr "A" [])
+                             ]) "ab'")
 
 ex1 = {- import -} prelude
     $ {- import -} plus1Traced
     $ Print $ Apply (Var "plus1") "1"
 
-ex2 = {- import -} prelude
+ex2a = {- import -} prelude
+     $ {- import -} toggle
+     $ Let ("xs", Let ("a", Constr "A" [])
+                $ Let ("b", Constr "B" [])
+                $ Let ("c2", Constr "Nil" [])
+                $ Let ("c1", Constr "Con" ["b", "c2"])
+                $            Constr "Con" ["a","c1"])
+     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "toggle")) "xs"))
+     $ Print $ Let ("ys", Apply (Var "h") "xs") 
+             $ Apply (Var "reverse") "ys"
+
+ex2b = {- import -} prelude
+     $ {- import -} toggle
+     $ Let ("xs", Let ("a", Constr "A" [])
+                $ Let ("b", Constr "B" [])
+                $ Let ("c2", Constr "Nil" [])
+                $ Let ("c1", Constr "Con" ["b", "c2"])
+                $            Constr "Con" ["a","c1"])
+     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "toggle")) "xs"))
+     $ Print $ Apply (Var "h") "xs"
+
+
+ex3 = {- import -} prelude
     $ {- import -} plus1Traced
-    $ {- import -} mapTraced
     $ Let ("xs", Let ("c3", Constr "Nil" [])
                $ Let ("c2", Constr "Con" ["3", "c3"])
                $ Let ("c1", Constr "Con" ["2", "c2"])
                $            Constr "Con" ["1", "c1"])
-    $ Print $ Let ("ys", Apply (Apply (Var "mapTraced") "plus1") "xs")
-                  $ Apply (Var "reverse") "ys"
+
+    $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "plus1")) "xs"))
+    $ Print $ Let ("ys", Apply (Var "h") "xs") 
+            $ Apply (Var "reverse") "ys"
+
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -496,7 +526,7 @@ data CompStmt
  = CompStmt
     { stmtLabel  :: Label
     , stmtStack  :: Stack
-    , stmtUID    :: UID
+    , stmtUID    :: [UID]
     , stmtRepr   :: String
     }
   deriving (Show,Eq,Ord)
@@ -538,7 +568,7 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
                           $ filter (\e -> j == (parentUID . eventParent) e) chds)
 
 mkStmt :: EventTree -> Event -> CompStmt
-mkStmt tree (e@(RootEvent l s i)) = CompStmt l s i r
+mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
         where r = dfsFold pre post "" (Just e) tree
               pre Nothing                     = (++" _")
               pre (Just (RootEvent l _ _))    = (++l)
@@ -550,6 +580,15 @@ mkStmt tree (e@(RootEvent l s i)) = CompStmt l s i r
               post (Just (ConstEvent _ _ r _)) = (++")")
               post (Just (LamEvent _ _))       = (++" }")
               post (Just (AppEvent _ _))       = id
+
+              i = dfsFold addUID nop [] (Just e) tree
+              addUID Nothing                     is = is
+              addUID (Just (RootEvent _ _ i))    is = i : is
+              addUID (Just (ConstEvent i _ _ _)) is = i : is
+              addUID (Just (LamEvent i _))       is = i : is
+              addUID (Just (AppEvent i _))       is = i : is
+              nop    _                           is = is
+        
 
 dfsFold :: (Maybe Event -> a -> a) -> (Maybe Event -> a -> a) -> a 
         -> (Maybe Event) -> EventTree -> a
@@ -680,7 +719,7 @@ showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt l s i r) = r -- ++ " (with stack " ++ show s ++ ")"
-        ++ "\n with min-age " ++ show i
+        ++ "\n with UIDs " ++ show (reverse i)
 
 showArc _  = ""
 
