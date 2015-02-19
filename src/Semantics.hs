@@ -25,7 +25,22 @@ ex1 = {- import -} prelude
     $ {- import -} plus1Traced
     $ Print $ Apply (Var "plus1") "1"
 
+-- Example 2: Function h and toggle are traced, h maps over a list and toggle is
+-- applied to all elements.
+--
+--   a) without reverse
+--   b) reverse before printing (but outside traced code)
 ex2a = {- import -} prelude
+     $ {- import -} toggle
+     $ Let ("xs", Let ("a", Constr "A" [])
+                $ Let ("b", Constr "B" [])
+                $ Let ("c2", Constr "Nil" [])
+                $ Let ("c1", Constr "Con" ["b", "c2"])
+                $            Constr "Con" ["a","c1"])
+     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "toggle")) "xs"))
+     $ Print $ Apply (Var "h") "xs"
+
+ex2b = {- import -} prelude
      $ {- import -} toggle
      $ Let ("xs", Let ("a", Constr "A" [])
                 $ Let ("b", Constr "B" [])
@@ -36,15 +51,6 @@ ex2a = {- import -} prelude
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
 
-ex2b = {- import -} prelude
-     $ {- import -} toggle
-     $ Let ("xs", Let ("a", Constr "A" [])
-                $ Let ("b", Constr "B" [])
-                $ Let ("c2", Constr "Nil" [])
-                $ Let ("c1", Constr "Con" ["b", "c2"])
-                $            Constr "Con" ["a","c1"])
-     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "toggle")) "xs"))
-     $ Print $ Apply (Var "h") "xs"
 
 
 ex3 = {- import -} prelude
@@ -569,7 +575,7 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
 
 mkStmt :: EventTree -> Event -> CompStmt
 mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
-        where r = dfsFold pre post "" (Just e) tree
+        where r = dfsFold Infix pre post "" (Just e) tree
               pre Nothing                     = (++" _")
               pre (Just (RootEvent l _ _))    = (++l)
               pre (Just (ConstEvent _ _ r _)) = (++" ("++r)
@@ -581,31 +587,34 @@ mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
               post (Just (LamEvent _ _))       = (++" }")
               post (Just (AppEvent _ _))       = id
 
-              i = dfsFold addUID nop [] (Just e) tree
+              i = dfsFold Prefix addUID nop [] (Just e) tree
               addUID Nothing                     is = is
               addUID (Just (RootEvent _ _ i))    is = i : is
               addUID (Just (ConstEvent i _ _ _)) is = i : is
               addUID (Just (LamEvent i _))       is = i : is
               addUID (Just (AppEvent i _))       is = i : is
               nop    _                           is = is
-        
 
-dfsFold :: (Maybe Event -> a -> a) -> (Maybe Event -> a -> a) -> a 
+data InfixOrPrefix = Infix | Prefix
+        
+dfsFold :: InfixOrPrefix -> (Maybe Event -> a -> a) -> (Maybe Event -> a -> a) -> a 
         -> (Maybe Event) -> EventTree -> a
-dfsFold pre post z me tree 
+dfsFold ip pre post z me tree 
   = let z'     = pre me z
         cs     = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
                                                                          Nothing   -> []
                             Nothing  -> []
-        csFold = foldl(\z'' d -> dfsFold pre post z'' (lookup d cs) tree) z' 
+        csFold = foldl(\z'' d -> dfsFold ip pre post z'' (lookup d cs) tree) z' 
   in post me $ case me of
     Nothing                     -> z'
     (Just (RootEvent _ _ i))    -> csFold [1]
     (Just (ConstEvent i _ _ l)) -> csFold [1..l]
     (Just (LamEvent i _))       -> csFold [1]
-    (Just (AppEvent i _))       -> let z1 = dfsFold pre post z (lookup 1 cs) tree
-                                       z2 = pre me z1 -- infix
-                                   in       dfsFold pre post z2 (lookup 2 cs) tree
+    (Just (AppEvent i _))       -> case ip of
+      Prefix -> csFold [1,2]
+      Infix  -> let z1 = dfsFold ip pre post z (lookup 1 cs) tree
+                    z2 = pre me z1
+                in       dfsFold ip pre post z2 (lookup 2 cs) tree
 
 --------------------------------------------------------------------------------
 -- Debug
