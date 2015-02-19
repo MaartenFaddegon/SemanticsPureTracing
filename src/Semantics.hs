@@ -13,6 +13,16 @@ plus1Traced = Let ("plus1", Lambda "x"
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
 
+plusTraced = Let ("p", Lambda "x" $ Lambda "y"
+                     $ Apply (Apply (Push "p" 
+                         (Lambda "a" (Lambda "b" 
+                           (Apply (Apply (Var "plus") "a") "b")))
+                       ) "x") "y")
+
+sumTraced = Let ("sum", Lambda "xs" (Apply (Push "sum" (Lambda "xs'" 
+                        (Apply (Apply (Apply (Var "foldl") "p") "0" )"xs'"))) "xs"))
+
+
 -- data AB = A | B
 -- toggle :: AB -> AB
 toggle = Let ("toggle", Lambda "ab'" $ Apply (Push "toggle" $ Lambda "ab"
@@ -51,18 +61,15 @@ ex2b = {- import -} prelude
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
 
-
+-- Example 3: sum with trusted foldl and p
 
 ex3 = {- import -} prelude
-    $ {- import -} plus1Traced
-    $ Let ("xs", Let ("c3", Constr "Nil" [])
-               $ Let ("c2", Constr "Con" ["3", "c3"])
-               $ Let ("c1", Constr "Con" ["2", "c2"])
-               $            Constr "Con" ["1", "c1"])
-
-    $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "plus1")) "xs"))
-    $ Print $ Let ("ys", Apply (Var "h") "xs") 
-            $ Apply (Var "reverse") "ys"
+    $ {- import -} plusTraced
+    $ {- import -} sumTraced
+    $ Let ("xs", Let ("c2", Constr "Nil" [])
+               $ Let ("c1", Constr "Con" ["1", "c2"])
+               $            Constr "Con" ["2","c1"])
+    $ Print $ Apply (Var "sum") "xs"
 
 
 --------------------------------------------------------------------------------
@@ -587,7 +594,7 @@ mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
               post (Just (LamEvent _ _))       = (++" }")
               post (Just (AppEvent _ _))       = id
 
-              i = dfsFold Prefix addUID nop [] (Just e) tree
+              i = reverse $ dfsFold Prefix addUID nop [] (Just e) tree
               addUID Nothing                     is = is
               addUID (Just (RootEvent _ _ i))    is = i : is
               addUID (Just (ConstEvent i _ _ _)) is = i : is
@@ -728,7 +735,7 @@ showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt l s i r) = r -- ++ " (with stack " ++ show s ++ ")"
-        ++ "\n with UIDs " ++ show (reverse i)
+        ++ "\n with UIDs " ++ show i
 
 showArc _  = ""
 
