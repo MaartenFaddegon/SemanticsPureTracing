@@ -13,6 +13,7 @@ plus1Traced = Let ("plus1", Lambda "x"
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
 
+-- NOTE: this only traces the top, all subsequent (recursive) calls to plus are not traced
 plusTraced = Let ("p", Lambda "x" $ Lambda "y"
                      $ Apply (Apply (Push "p" 
                          (Lambda "a" (Lambda "b" 
@@ -23,54 +24,77 @@ sumTraced = Let ("sum", Lambda "xs" (Apply (Push "sum" (Lambda "xs'"
                         (Apply (Apply (Apply (Var "foldl") "p") "0" )"xs'"))) "xs"))
 
 
--- data AB = A | B
--- toggle :: AB -> AB
-toggle = Let ("toggle", Lambda "ab'" $ Apply (Push "toggle" $ Lambda "ab"
-                      $ Case (Var "ab")
-                             [ (Constr "A" [], Constr "B" [])
-                             , (Constr "B" [], Constr "A" [])
-                             ]) "ab'")
+-- data B = T | F
+-- n :: B -> B
+myNot = Let ("n", Lambda "b'" $ Apply (Push "n" $ Lambda "b"
+                      $ Case (Var "b")
+                             [ (Constr "T" [], Constr "F" [])
+                             , (Constr "F" [], Constr "T" [])
+                             ]) "b'")
+
+
+-- x :: B -> B -> B
+myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Push "x" $ Lambda "b1" $ Lambda "b2"
+                      $ Case (Var "b1")
+                             [ (Constr "T" [], Case (Var "b2")[ (Constr "T" [], Constr "F" [])
+                                                              , (Constr "F" [], Constr "T" [])])
+                             , (Constr "F" [], Case (Var "b2")[ (Constr "T" [], Constr "T" [])
+                                                              , (Constr "F" [], Constr "T" [])])
+                             ]
+                             ) "a1") "a2")
+
+
+myChecksum = Let ("c", Lambda "as" (Apply (Push "c" (Lambda "bs" $
+                        Let ("z", Constr "F" [])
+                            (Apply (Apply (Apply (Var "foldl") "x") "z" )"bs"))) "as"))
 
 ex1 = {- import -} prelude
-    $ {- import -} plus1Traced
-    $ Print $ Apply (Var "plus1") "1"
+    $ {- import -} myNot
+    $ Let ("b", (Constr "F" []))
+    $ Print $ Apply (Var "n") "b"
 
--- Example 2: Function h and toggle are traced, h maps over a list and toggle is
+-- Example 2: Function h and n are traced, h maps over a list and n is
 -- applied to all elements.
 --
 --   a) without reverse
 --   b) reverse before printing (but outside traced code)
+
 ex2a = {- import -} prelude
-     $ {- import -} toggle
-     $ Let ("xs", Let ("a", Constr "A" [])
-                $ Let ("b", Constr "B" [])
+     $ {- import -} myNot
+     $ Let ("xs", Let ("a", Constr "T" [])
+                $ Let ("b", Constr "F" [])
                 $ Let ("c2", Constr "Nil" [])
                 $ Let ("c1", Constr "Con" ["b", "c2"])
                 $            Constr "Con" ["a","c1"])
-     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "toggle")) "xs"))
+     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "n")) "xs"))
      $ Print $ Apply (Var "h") "xs"
 
 ex2b = {- import -} prelude
-     $ {- import -} toggle
-     $ Let ("xs", Let ("a", Constr "A" [])
-                $ Let ("b", Constr "B" [])
+     $ {- import -} myNot
+     $ Let ("xs", Let ("a", Constr "T" [])
+                $ Let ("b", Constr "F" [])
                 $ Let ("c2", Constr "Nil" [])
                 $ Let ("c1", Constr "Con" ["b", "c2"])
                 $            Constr "Con" ["a","c1"])
-     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "toggle")) "xs"))
+     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "n")) "xs"))
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
 
--- Example 3: sum with trusted foldl and p
+-- Example 3: checksum
 
 ex3 = {- import -} prelude
-    $ {- import -} plusTraced
-    $ {- import -} sumTraced
-    $ Let ("xs", Let ("c2", Constr "Nil" [])
-               $ Let ("c1", Constr "Con" ["1", "c2"])
-               $            Constr "Con" ["2","c1"])
-    $ Print $ Apply (Var "sum") "xs"
+    $ {- import -} myXor
+    $ {- import -} myChecksum
+     $ Let ("bs", Let ("a", Constr "T" [])
+                $ Let ("b", Constr "F" [])
+                $ Let ("c2", Constr "Nil" [])
+                $ Let ("c1", Constr "Con" ["b", "c2"])
+                $            Constr "Con" ["a","c1"])
+    $ Print $ Apply (Var "c") "bs"
 
+ex3a = {- import -} prelude
+     $ {- import -} plusTraced
+     $ Print $ Apply (Apply (Var "p") "2") "2"
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -582,7 +606,7 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
 
 mkStmt :: EventTree -> Event -> CompStmt
 mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
-        where r = dfsFold Infix pre post "" (Just e) tree
+        where r = dfsFold Prefix pre post "" (Just e) tree
               pre Nothing                     = (++" _")
               pre (Just (RootEvent l _ _))    = (++l)
               pre (Just (ConstEvent _ _ r _)) = (++" ("++r)
