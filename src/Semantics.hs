@@ -605,16 +605,16 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
 
 mkStmt :: EventTree -> Event -> CompStmt
 mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
-        where r = dfsFold Prefix pre post "" (Just e) tree
+        where r = dfsFold Infix pre post "" (Just e) tree
               pre Nothing                     = (++" _")
               pre (Just (RootEvent l _ _))    = (++l)
               pre (Just (ConstEvent _ _ r _)) = (++" ("++r)
-              pre (Just (LamEvent _ _))       = (++" {")
+              pre (Just (LamEvent _ _))       = (++" (")
               pre (Just (AppEvent _ _))       = (++" ->")
               post Nothing                     = id
               post (Just (RootEvent l _ _))    = id
               post (Just (ConstEvent _ _ r _)) = (++")")
-              post (Just (LamEvent _ _))       = (++" }")
+              post (Just (LamEvent _ _))       = (++")")
               post (Just (AppEvent _ _))       = id
 
               i = reverse $ dfsFold Prefix addUID nop [] (Just e) tree
@@ -639,12 +639,15 @@ dfsFold ip pre post z me tree
     Nothing                     -> z'
     (Just (RootEvent _ _ i))    -> csFold [1]
     (Just (ConstEvent i _ _ l)) -> csFold [1..l]
-    (Just (LamEvent i _))       -> csFold [1]
+    (Just (LamEvent i _))       -> csFold [1]         -- (Note 1)
     (Just (AppEvent i _))       -> case ip of
       Prefix -> csFold [1,2]
       Infix  -> let z1 = dfsFold ip pre post z (lookup 1 cs) tree
                     z2 = pre me z1
                 in       dfsFold ip pre post z2 (lookup 2 cs) tree
+
+-- Note 1: An abstraction can be applied more than once. Lookup only finds the 
+--         first, but we want to find and proccess all applications!
 
 --------------------------------------------------------------------------------
 -- Pegs and holes
@@ -667,15 +670,16 @@ compareRel j1s j2s ks = compare (pegIndex j1s ks) (pegIndex j2s ks)
 -- Debug
 
 data Vertex = RootVertex | Vertex [CompStmt] deriving (Eq)
-type CompGraph = Graph Vertex ()
+type CompGraph = Graph Vertex PegIndex
+type PegIndex = Int
 
 mkGraph :: (Expr,[CompStmt]) -> (Expr,CompGraph)
 mkGraph (reduct,trc) = let (Graph _ vs as) = mapGraph mkVertex (mkGraph' trc)
                            rs              = filter (\(Vertex [c]) -> stmtStack c == []) vs
-                           as'             = map (\r -> Arc RootVertex r ()) rs
+                           as'             = map (\r -> Arc RootVertex r 0) rs
                        in (reduct, Graph RootVertex (RootVertex:vs) (as' ++ as))
 
-mkGraph' :: [CompStmt] -> Graph CompStmt ()
+mkGraph' :: [CompStmt] -> Graph CompStmt PegIndex
 mkGraph' trace
   | length trace < 1 = error "mkGraph: empty trace"
   | otherwise = Graph (head trace) -- doesn't really matter, replaced above
@@ -699,11 +703,10 @@ combinations k xs = combinations' (length xs) k xs
 permutationsOfLength :: Int -> [a] -> [[a]]
 permutationsOfLength x = (foldl (++) []) . (map permutations) . (combinations x)
 
-mkArcs :: [CompStmt] -> [Arc CompStmt ()]
+mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
 mkArcs cs = callArcs ++ pushArcs
-  where pushArcs = map (\[c1,c2]    -> Arc c1 c2 ()) ps 
-        callArcs = foldl (\as [c1,c2,c3] -> (Arc c1 c2 ()) 
-                                            : ((Arc c2 c3 ()) : as)) [] ts 
+  where pushArcs = map (\[c1,c2] -> mkArc c1 c2) ps 
+        callArcs = foldl (\as [c1,c2,c3] -> mkArc c1 c2 : (mkArc c2 c3 : as)) [] ts 
         ps = filter f2 (permutationsOfLength 2 cs)
         ts = filter f3 (permutationsOfLength 3 cs)
 
@@ -712,6 +715,9 @@ mkArcs cs = callArcs ++ pushArcs
 
         f2 [c1,c2]    = pushDependency c1 c2
         f2 _          = False
+
+mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
+mkArc p c = Arc p c $ pegIndex (stmtUID c) (stmtUID p)
 
 
 arcsFrom :: CompStmt -> [CompStmt] -> [Arc CompStmt ()]
@@ -779,7 +785,8 @@ showCompStmt (CompStmt l s i r) = r
         ++ "\n with UIDs " ++ show i
         ++ "\n with holes " ++ show (holes i)
 
-showArc _  = ""
+showArc :: Arc Vertex PegIndex -> String
+showArc (Arc _ _ i)  = show i
 
 disp' f expr = do
   putStrLn (messages ++ strc)
