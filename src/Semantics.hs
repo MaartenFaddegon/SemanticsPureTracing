@@ -2,7 +2,7 @@ module Semantics where
 
 import Control.Monad.State
 import Data.Graph.Libgraph
-import Data.List (sort,partition,permutations,nub)
+import Data.List (sort,partition,permutations,nub,minimum,maximum)
 import qualified Debug.Trace as Debug
 
 --------------------------------------------------------------------------------
@@ -647,6 +647,23 @@ dfsFold ip pre post z me tree
                 in       dfsFold ip pre post z2 (lookup 2 cs) tree
 
 --------------------------------------------------------------------------------
+-- Pegs and holes
+
+holes :: [Int] -> [Int]
+holes js = [i | i <- [(minimum js) .. (maximum js)], i `notElem` js]
+
+pegs :: [Int] -> [Int] -> [Int]
+pegs js ks = [i | i <- holes js, i `elem` ks]
+
+pegIndex :: [Int] -> [Int] -> Int
+pegIndex js ks = case pegs js ks of
+  []    -> error "pegIndex: no peg found in parent statement"
+  (p:_) -> length (takeWhile (/= p) ks)
+
+compareRel :: [Int] -> [Int] -> [Int] -> Ordering
+compareRel j1s j2s ks = compare (pegIndex j1s ks) (pegIndex j2s ks)
+
+--------------------------------------------------------------------------------
 -- Debug
 
 data Vertex = RootVertex | Vertex [CompStmt] deriving (Eq)
@@ -757,8 +774,10 @@ showVertex' RootVertex  = "Root"
 showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
-showCompStmt (CompStmt l s i r) = r -- ++ " (with stack " ++ show s ++ ")"
+showCompStmt (CompStmt l s i r) = r
+        -- ++ "\n with stack " ++ show s
         ++ "\n with UIDs " ++ show i
+        ++ "\n with holes " ++ show (holes i)
 
 showArc _  = ""
 
