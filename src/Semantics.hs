@@ -13,12 +13,18 @@ plus1Traced = Let ("plus1", Lambda "x"
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
 
--- NOTE: this only traces the top, all subsequent (recursive) calls to plus are not traced
+-- NOTE: this only traces the top, subsequent (recursive) calls to plus are not traced
 plusTraced = Let ("p", Lambda "x" $ Lambda "y"
                      $ Apply (Apply (Push "p" 
                          (Lambda "a" (Lambda "b" 
                            (Apply (Apply (Var "plus") "a") "b")))
                        ) "x") "y")
+
+
+-- NOTE: this only traces the top, subsequent (recursive) calls to foldl are not traced
+foldlTraced = Let ("foldlT", Lambda "f" $ Lambda "xs"  $ Lambda "z"
+                           $ Apply (Apply (Apply (Push "foldl" 
+                             (Var "foldl")) "f") "xs" ) "z")
 
 sumTraced = Let ("sum", Lambda "xs" (Apply (Push "sum" (Lambda "xs'" 
                         (Apply (Apply (Apply (Var "foldl") "p") "0" )"xs'"))) "xs"))
@@ -43,10 +49,6 @@ myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Push "x" $ Lambda "b
                              ]
                              ) "a1") "a2")
 
-
-myChecksum = Let ("c", Lambda "as" (Apply (Push "c" (Lambda "bs" $
-                        Let ("z", Constr "F" [])
-                            (Apply (Apply (Apply (Var "foldl") "x") "z" )"bs"))) "as"))
 
 ex1 = {- import -} prelude
     $ {- import -} myNot
@@ -83,18 +85,15 @@ ex2b = {- import -} prelude
 -- Example 3: checksum
 
 ex3 = {- import -} prelude
+    $ {- import -} foldlTraced
     $ {- import -} myXor
-    $ {- import -} myChecksum
      $ Let ("bs", Let ("a", Constr "T" [])
                 $ Let ("b", Constr "F" [])
                 $ Let ("c2", Constr "Nil" [])
                 $ Let ("c1", Constr "Con" ["b", "c2"])
                 $            Constr "Con" ["a","c1"])
-    $ Print $ Apply (Var "c") "bs"
-
-ex3a = {- import -} prelude
-     $ {- import -} plusTraced
-     $ Print $ Apply (Apply (Var "p") "2") "2"
+     $ Let ("z", Constr "F" [])
+     $ Print $ Apply (Apply (Apply (Var "foldlT") "x") "z") "bs"
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -404,7 +403,7 @@ reduce (Case e1 alts) = do
                        Nothing    -> return $ non_exh s
     _ -> return $ Exception "Case on a non-Constr expression"
     
-    where non_exh s                = Exception $ "Non-exhaustive patterns in Case :" ++ s
+    where non_exh s                = Exception $ "Non-exhaustive patterns in Case: " ++ s
           lookup s                 = (Prelude.lookup s) 
                                    . (map $ \(Constr t ys,e)->(t,(Constr t ys,e)))
           red ys (Constr s xs, e2) = eval $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
