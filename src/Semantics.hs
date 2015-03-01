@@ -568,6 +568,7 @@ data CompStmt
   deriving (Show,Eq,Ord)
 
 type UID = Int
+type ParentPosition = Int
 
 data Parent = Parent {parentUID :: UID,  parentPosition :: Int} 
               deriving (Show,Eq,Ord)
@@ -609,12 +610,12 @@ mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
               pre Nothing                     = (++" _")
               pre (Just (RootEvent l _ _))    = (++l)
               pre (Just (ConstEvent _ _ r _)) = (++" ("++r)
-              pre (Just (LamEvent _ _))       = (++" (")
+              pre (Just (LamEvent _ _))       = (++" {")
               pre (Just (AppEvent _ _))       = (++" ->")
               post Nothing                     = id
               post (Just (RootEvent l _ _))    = id
               post (Just (ConstEvent _ _ r _)) = (++")")
-              post (Just (LamEvent _ _))       = (++")")
+              post (Just (LamEvent _ _))       = (++"}")
               post (Just (AppEvent _ _))       = id
 
               i = reverse $ dfsFold Prefix addUID nop [] (Just e) tree
@@ -634,12 +635,25 @@ dfsFold ip pre post z me tree
         cs     = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
                                                                          Nothing   -> []
                             Nothing  -> []
-        csFold = foldl(\z'' d -> dfsFold ip pre post z'' (lookup d cs) tree) z' 
+
+        -- Fold over each child found via the list of parentPositions ds
+        -- csFold :: [ParentPosition] -> a
+        csFold ds = foldl (\z'' d -> dfsFold ip pre post z'' (lookup d cs) tree) z' ds
+
+        -- Fold over all childring claiming parentPosition d
+        -- csFoldMany :: ParentPosition -> a
+        csFoldMany d = let mes = (lookupMany d)
+                       in foldl (\z'' me -> dfsFold ip pre post z'' me tree) z' mes
+
+        lookupMany :: ParentPosition -> [Maybe Event]
+        lookupMany d  = (map (Just) . (map snd) . (filter (\(b,_) -> b == d))) cs
+
+
   in post me $ case me of
     Nothing                     -> z'
     (Just (RootEvent _ _ i))    -> csFold [1]
     (Just (ConstEvent i _ _ l)) -> csFold [1..l]
-    (Just (LamEvent i _))       -> csFold [1]         -- (Note 1)
+    (Just (LamEvent i _))       -> csFoldMany 1
     (Just (AppEvent i _))       -> case ip of
       Prefix -> csFold [1,2]
       Infix  -> let z1 = dfsFold ip pre post z (lookup 1 cs) tree
