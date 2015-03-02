@@ -29,6 +29,8 @@ foldlTraced = Let ("foldlT", Lambda "f" $ Lambda "xs"  $ Lambda "z"
 sumTraced = Let ("sum", Lambda "xs" (Apply (Push "sum" (Lambda "xs'" 
                         (Apply (Apply (Apply (Var "foldl") "p") "0" )"xs'"))) "xs"))
 
+mapTraced = Let ("mapT", Lambda "f" $ Lambda "xs"
+                       $ Apply (Apply (Push "map" (Var "map")) "f") "xs" )
 
 -- data B = T | F
 -- n :: B -> B
@@ -82,9 +84,34 @@ ex2b = {- import -} prelude
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
 
--- Example 3: checksum
+-- Example 3: Trace map and its callees, reverse result before printing
+-- but outside traced code
 
-ex3 = {- import -} prelude
+ex3a = {- import -} prelude
+     $ {- import -} myNot
+     $ {- import -} mapTraced
+     $ Let ("xs", Let ("a", Constr "T" [])
+                $ Let ("b", Constr "F" [])
+                $ Let ("c2", Constr "Nil" [])
+                $ Let ("c1", Constr "Con" ["b", "c2"])
+                $            Constr "Con" ["a","c1"])
+     $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
+             $ Var "ys"
+
+ex3b = {- import -} prelude
+     $ {- import -} myNot
+     $ {- import -} mapTraced
+     $ Let ("xs", Let ("a", Constr "T" [])
+                $ Let ("b", Constr "F" [])
+                $ Let ("c2", Constr "Nil" [])
+                $ Let ("c1", Constr "Con" ["b", "c2"])
+                $            Constr "Con" ["a","c1"])
+     $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
+             $ Apply (Var "reverse") "ys"
+
+-- Example 4: Trace foldl and its callees in a simple checksum program
+
+ex4 = {- import -} prelude
     $ {- import -} foldlTraced
     $ {- import -} myXor
      $ Let ("bs", Let ("a", Constr "T" [])
@@ -606,57 +633,62 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
 
 mkStmt :: EventTree -> Event -> CompStmt
 mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
-        where r = dfsFold Infix pre post "" 0 (Just e) tree
-              pre Nothing                      ad = (++" _")
-              pre (Just (RootEvent l _ _))     ad = (++l)
-              pre (Just (ConstEvent _ _ r _))  ad = (++" ("++r)
-              pre (Just (LamEvent _ _))        ad = (++" {")
-              pre (Just (AppEvent _ _))        ad = (++" ->")
-              post Nothing                     ad = id
-              post (Just (RootEvent l _ _))    ad = id
-              post (Just (ConstEvent _ _ r _)) ad = (++")")
-              post (Just (LamEvent _ _))       ad = (++"}")
-              post (Just (AppEvent _ _))       ad = id
+        where r = dfsFold Infix pre post "" Trunk (Just e) tree
+              pre Nothing                      _ = (++" _")
+              pre (Just (RootEvent l _ _))     _ = (++l)
+              pre (Just (ConstEvent _ _ r _))  _ = (++" ("++r)
+              pre (Just (LamEvent _ _))        _ = (++" {")
+              pre (Just (AppEvent _ _))        _ = (++" ->")
+              post Nothing                     _ = id
+              post (Just (RootEvent l _ _))    _ = id
+              post (Just (ConstEvent _ _ r _)) _ = (++")")
+              post (Just (LamEvent _ _))       _ = (++"}")
+              post (Just (AppEvent _ _))       _ = id
 
-              i = reverse $ dfsFold Prefix addUID nop [] 0 (Just e) tree
-              addUID Nothing                      ad is = is
-              addUID (Just (RootEvent _ _ i))     ad is = i : is
-              addUID (Just (ConstEvent i _ _ _))  ad is = i : is
-              addUID (Just (LamEvent i _))        ad is = i : is
-              addUID (Just (AppEvent i _))        ad is = i : is
-              nop    _                            ad is = is
+              i = reverse $ dfsFold Prefix addUID nop [] Trunk (Just e) tree
+              addUID Nothing                      _ is = is
+              addUID (Just (RootEvent _ _ i))     _ is = i : is
+              addUID (Just (ConstEvent i _ _ _))  _ is = i : is
+              addUID (Just (LamEvent i _))        _ is = i : is
+              addUID (Just (AppEvent i _))        _ is = i : is
+              nop    _                            _ is = is
 
 data InfixOrPrefix = Infix | Prefix
+
+data WhereAmI = Trunk | ArgumentOf WhereAmI | ResultOf WhereAmI
+
+type Visit a = Maybe Event -> WhereAmI -> a -> a
         
-dfsFold :: InfixOrPrefix -> (Maybe Event -> Int -> a -> a) -> (Maybe Event -> Int -> a -> a) -> a 
-        -> Int -> (Maybe Event) -> EventTree -> a
-dfsFold ip pre post z depth me tree 
-  = let z'     = pre me depth z
-        cs     = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
-                                                                         Nothing   -> []
-                            Nothing  -> []
+dfsFold :: InfixOrPrefix -> Visit a -> Visit a -> a 
+        -> WhereAmI -> (Maybe Event) -> EventTree -> a
+
+dfsFold ip pre post z w me tree 
+  = let z'  = pre me w z
+        cs  = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
+                                                                      Nothing   -> []
+                         Nothing  -> []
 
         -- Fold over each child found via the list of parentPositions ds
-        csFold ds = foldl (\z'' d -> dfsFold ip pre post z'' depth (lookup d cs) tree) z' ds
+        csFold ds = foldl (\z'' (d,w') -> dfsFold ip pre post z'' w' (lookup d cs) tree) z' ds
 
         -- Fold over all applications of a lambda
-        csFoldMany = let mes = (lookupMany 1)
-                     in foldl (\z'' me -> dfsFold ip pre post z'' (depth+1) me tree) z' mes
+        csFoldMany w' = let mes = (lookupMany 1)
+                        in foldl (\z'' me -> dfsFold ip pre post z'' w' me tree) z' mes
 
         lookupMany :: ParentPosition -> [Maybe Event]
         lookupMany d  = (map (Just) . (map snd) . (filter (\(b,_) -> b == d))) cs
 
 
-  in post me depth $ case me of
+  in post me w $ case me of
     Nothing                     -> z'
-    (Just (RootEvent _ _ i))    -> csFold [1]
-    (Just (ConstEvent i _ _ l)) -> csFold [1..l]
-    (Just (LamEvent i _))       -> csFoldMany
+    (Just (RootEvent _ _ i))    -> csFold [(1,w)]
+    (Just (ConstEvent i _ _ l)) -> csFold $ zip [1..l] (repeat w)
+    (Just (LamEvent i _))       -> csFoldMany w
     (Just (AppEvent i _))       -> case ip of
-      Prefix -> csFold [1,2]
-      Infix  -> let z1 = dfsFold ip pre post z depth (lookup 1 cs) tree
-                    z2 = pre me depth z1
-                in       dfsFold ip pre post z2 depth (lookup 2 cs) tree
+      Prefix -> csFold [(1,ArgumentOf w),(2,ResultOf w)]
+      Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf w) (lookup 1 cs) tree
+                    z2 = pre me w z1
+                in       dfsFold ip pre post z2 (ResultOf w) (lookup 2 cs) tree
 
 -- Note 1: An abstraction can be applied more than once. Lookup only finds the 
 --         first, but we want to find and proccess all applications!
