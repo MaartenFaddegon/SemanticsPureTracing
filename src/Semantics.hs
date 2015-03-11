@@ -34,7 +34,12 @@ mapTraced = Let ("mapT", Lambda "f" $ Lambda "xs"
 
 -- data B = T | F
 -- n :: B -> B
-myNot = Let ("n", Lambda "b'" $ Apply (Push "n" $ Lambda "b"
+myNot     = Let ("n", Lambda "b" $ Case (Var "b")
+                    [ (Constr "T" [], Constr "F" [])
+                    , (Constr "F" [], Constr "T" [])
+                    ])
+
+notTraced = Let ("n", Lambda "b'" $ Apply (Push "n" $ Lambda "b"
                       $ Case (Var "b")
                              [ (Constr "T" [], Constr "F" [])
                              , (Constr "F" [], Constr "T" [])
@@ -53,7 +58,7 @@ myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Push "x" $ Lambda "b
 
 
 ex1 = {- import -} prelude
-    $ {- import -} myNot
+    $ {- import -} notTraced
     $ Let ("b", (Constr "F" []))
     $ Print $ Apply (Var "n") "b"
 
@@ -64,7 +69,7 @@ ex1 = {- import -} prelude
 --   b) reverse before printing (but outside traced code)
 
 ex2a = {- import -} prelude
-     $ {- import -} myNot
+     $ {- import -} notTraced
      $ Let ("xs", Let ("a", Constr "T" [])
                 $ Let ("b", Constr "F" [])
                 $ Let ("c2", Constr "Nil" [])
@@ -74,7 +79,7 @@ ex2a = {- import -} prelude
      $ Print $ Apply (Var "h") "xs"
 
 ex2b = {- import -} prelude
-     $ {- import -} myNot
+     $ {- import -} notTraced
      $ Let ("xs", Let ("a", Constr "T" [])
                 $ Let ("b", Constr "F" [])
                 $ Let ("c2", Constr "Nil" [])
@@ -99,7 +104,7 @@ ex3a = {- import -} prelude
              $ Var "ys"
 
 ex3b = {- import -} prelude
-     $ {- import -} myNot
+     $ {- import -} notTraced
      $ {- import -} mapTraced
      $ Let ("xs", Let ("a", Constr "T" [])
                 $ Let ("b", Constr "F" [])
@@ -121,6 +126,25 @@ ex4 = {- import -} prelude
                 $            Constr "Con" ["a","c1"])
      $ Let ("z", Constr "F" [])
      $ Print $ Apply (Apply (Apply (Var "foldlT") "x") "z") "bs"
+
+-- Example 5: 
+--      a) f -> g -> h
+--      b) f -> g, f -> h
+
+ex5a = Let ("h", Lambda "x" (Apply (Push "h" (Lambda "y" $ Var "y")) "x"))
+     $ Let ("g", Lambda "x" (Apply (Push "g" (Lambda "y" $ Apply (Var "h") "y")) "x"))
+     $ Let ("f", Lambda "x" (Apply (Push "f" (Lambda "y" $ Apply (Var "g") "y")) "x"))
+     $ Let ("k", Constr "1" [])
+     $ Print $ Apply (Var "f") "k"
+
+ex5b = Let ("h", Lambda "x" (Apply (Push "h" (Lambda "y" $ Var "y")) "x"))
+     $ Let ("g", Lambda "x" (Apply (Push "g" (Lambda "y" $ Var "y")) "x"))
+     $ Let ("f", Lambda "x" (Apply (Push "f" (Lambda "y" $ Let ("z", Apply (Var "g") "y")
+                                                               (Apply (Var "h") "z")
+                                             )) "x"))
+     $ Let ("k", Constr "1" [])
+     $ Print $ Apply (Var "f") "k"
+
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -825,7 +849,7 @@ showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt l s i r) = r
-        -- ++ "\n with stack " ++ show s
+        ++ "\n with stack " ++ show s
         ++ "\n with UIDs " ++ show i
         ++ "\n with holes " ++ show (holes i)
 
