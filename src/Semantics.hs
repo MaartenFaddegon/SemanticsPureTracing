@@ -640,7 +640,7 @@ doTrace rec = do
 
 -- Searchable mapping from UID of the parent and position in list of siblings
 -- to a child event.
-type EventTree = [(UID, [(Int, Event)])]
+type EventForest = [(UID, [(Int, Event)])]
 
 mkStmts :: (Expr,Trace) -> (Expr,[CompStmt])
 mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
@@ -649,15 +649,15 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
         isRoot _                 = False
         (roots,chds) = partition isRoot trc
 
-        events :: EventTree
+        events :: EventForest
         events = map children trc
         children e = let j = eventUID e
                      in (j, map    (\c -> (parentPosition . eventParent $ c, c))
                           $ filter (\e -> j == (parentUID . eventParent) e) chds)
 
-mkStmt :: EventTree -> Event -> CompStmt
-mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
-        where r = dfsFold Infix pre post "" Trunk (Just e) tree
+mkStmt :: EventForest -> Event -> CompStmt
+mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r
+        where r = dfsFold Infix pre post "" Trunk (Just e) forest
               pre Nothing                      _ = (++" _")
               pre (Just (RootEvent l _ _))     _ = (++l)
               pre (Just (ConstEvent _ _ r _))  _ = (++" ("++r)
@@ -669,7 +669,7 @@ mkStmt tree (e@(RootEvent l s _)) = CompStmt l s i r
               post (Just (LamEvent _ _))       _ = (++"}")
               post (Just (AppEvent _ _))       _ = id
 
-              i = reverse $ dfsFold Prefix addUID nop [] Trunk (Just e) tree
+              i = reverse $ dfsFold Prefix addUID nop [] Trunk (Just e) forest
               addUID Nothing                      _ is = is
               addUID (Just (RootEvent _ _ i))     _ is = i : is
               addUID (Just (ConstEvent i _ _ _))  _ is = i : is
@@ -684,7 +684,7 @@ data WhereAmI = Trunk | ArgumentOf WhereAmI | ResultOf WhereAmI
 type Visit a = Maybe Event -> WhereAmI -> a -> a
         
 dfsFold :: InfixOrPrefix -> Visit a -> Visit a -> a 
-        -> WhereAmI -> (Maybe Event) -> EventTree -> a
+        -> WhereAmI -> (Maybe Event) -> EventForest -> a
 
 dfsFold ip pre post z w me tree 
   = let z'  = pre me w z
@@ -717,22 +717,64 @@ dfsFold ip pre post z w me tree
 -- Note 1: An abstraction can be applied more than once. Lookup only finds the 
 --         first, but we want to find and proccess all applications!
 
+
+
 --------------------------------------------------------------------------------
--- Pegs and holes
+-- Pegs and holes in event trees
 
-holes :: [Int] -> [Int]
-holes js = [i | i <- [(minimum js) .. (maximum js)], i `notElem` js]
+data Range = Range Int Int
 
-pegs :: [Int] -> [Int] -> [Int]
-pegs js ks = [i | i <- holes js, i `elem` ks]
+data Hole = PreArg Int Range
+          | InArg  Int Range
+          | PreRes Range
+          | InRes  Range
 
-pegIndex :: [Int] -> [Int] -> Int
-pegIndex js ks = case pegs js ks of
-  []    -> error "pegIndex: no peg found in parent statement"
-  (p:_) -> length (takeWhile (/= p) ks)
+holes :: EventForest -> Event -> [Hole]
+holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
+  where z :: ([Range],[Hole])
+        z = ([],[])
+    
+        pre :: Visit ([Range],[Hole])
+        pre (Just (RootEvent _ _ i))    w (r,h) = undefined
+        pre (Just (LamEvent i _))       w (r,h) = undefined
+        pre (Just (AppEvent i _))       w (r,h) = undefined
+        pre (Just (ConstEvent i _ _ l)) w (r,h) = undefined
+        pre Nothing                     w (r,h) = undefined
+    
+        post :: Visit ([Range],[Hole])
+        post = undefined
 
-compareRel :: [Int] -> [Int] -> [Int] -> Ordering
-compareRel j1s j2s ks = compare (pegIndex j1s ks) (pegIndex j2s ks)
+depends = undefined
+
+---   --------------------------------------------------------------------------------
+---   -- Pegs and holes on ranges (doesn't quite do the trick)
+---   
+---   holes :: [Int] -> [Int]
+---   holes js = [i | i <- [(minimum js) .. (maximum js)], i `notElem` js]
+---   
+---   pegs :: [Int] -> [Int] -> [Int]
+---   pegs js ks = [i | i <- holes js, i `elem` ks]
+---   
+---   pegIndex :: [Int] -> [Int] -> Int
+---   pegIndex js ks = case pegs js ks of
+---     []    -> -1 -- error "pegIndex: no peg found in parent statement"
+---     (p:_) -> length (takeWhile (/= p) ks)
+---   
+---   -- compareRel :: [Int] -> [Int] -> [Int] -> Ordering
+---   -- compareRel j1s j2s ks = compare (pegIndex j1s ks) (pegIndex j2s ks)
+---   
+---   encloses :: [Int] -> [Int] -> Bool
+---   encloses js ks = (minimum js) < (minimum ks) && (maximum js) > (maximum ks)
+---   
+---   perfectFit :: [Int] -> [Int] -> Bool
+---   perfectFit js ks = all (\j -> j `elem` ks) (holes js)
+---   
+---   fits js ks = case holes js of
+---     [] -> False
+---     hs -> last hs `elem` ks
+---   
+---   depends :: [Int] -> [Int] -> Bool
+---   depends ks js = fits js ks && not (encloses ks js)
 
 --------------------------------------------------------------------------------
 -- Debug
@@ -771,57 +813,65 @@ combinations k xs = combinations' (length xs) k xs
 permutationsOfLength :: Int -> [a] -> [[a]]
 permutationsOfLength x = (foldl (++) []) . (map permutations) . (combinations x)
 
+
 mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
-mkArcs cs = callArcs ++ pushArcs
-  where pushArcs = map (\[c1,c2] -> mkArc c1 c2) ps 
-        callArcs = foldl (\as [c1,c2,c3] -> mkArc c1 c2 : (mkArc c2 c3 : as)) [] ts 
-        ps = filter f2 (permutationsOfLength 2 cs)
-        ts = filter f3 (permutationsOfLength 3 cs)
+mkArcs trc = map (\(src,tgt) -> mkArc src tgt) [(src,tgt) | src <- trc, tgt <- trc, depends (stmtUID tgt) (stmtUID src)]
 
-        f3 [c1,c2,c3] = callDependency c1 c2 c3
-        f3 _          = False -- less than 3 statements
-
-        f2 [c1,c2]    = pushDependency c1 c2
-        f2 _          = False
 
 mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
-mkArc p c = Arc p c $ pegIndex (stmtUID c) (stmtUID p)
+mkArc p c = Arc p c pegIndex
+  where pegIndex = -1 -- TODO
 
-
-arcsFrom :: CompStmt -> [CompStmt] -> [Arc CompStmt ()]
-arcsFrom src trc =  ((map (\tgt -> Arc src tgt ())) . (filter isPushArc) $ trc)
-                 ++ ((map (\tgt -> Arc src tgt ())) . (filter isCall1Arc) $ trc)
-
-  where isPushArc = pushDependency src
-        
-        isCall1Arc = anyOf $ map (flip callDependency src) trc
-
-        isCall2Arc = anyOf $  apmap (map (callDependency2 src) trc) trc
-                           ++ apmap (map (callDependency2' src) trc) trc
-
-        anyOf :: [a->Bool] -> a -> Bool
-        anyOf ps x = or (map (\p -> p x) ps)
-
-        apmap :: [a->b] -> [a] -> [b]
-        apmap fs xs = foldl (\acc f -> acc ++ (map f xs)) [] fs
-
-nextStack :: CompStmt -> Stack
-nextStack rec = push (stmtLabel rec) (stmtStack rec)
-
-pushDependency :: CompStmt -> CompStmt -> Bool
-pushDependency p c = nextStack p == stmtStack c
-
-callDependency :: CompStmt -> CompStmt -> CompStmt -> Bool
-callDependency pApp pLam c = 
-  stmtStack c == call (nextStack pApp) (nextStack pLam)
-
-callDependency2 :: CompStmt -> CompStmt -> CompStmt -> CompStmt -> Bool
-callDependency2 pApp pApp' pLam' c = call (nextStack pApp) pLam == stmtStack c
-  where pLam = call (nextStack pApp') (nextStack pLam')
-
-callDependency2' :: CompStmt -> CompStmt -> CompStmt -> CompStmt -> Bool
-callDependency2' pApp1 pApp2 pLam c = call pApp (nextStack pLam) == stmtStack c
-  where pApp = call (nextStack pApp1) (nextStack pApp2)
+-- mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
+-- mkArcs cs = callArcs ++ pushArcs
+--   where pushArcs = map (\[c1,c2] -> mkArc c1 c2) ps 
+--         callArcs = foldl (\as [c1,c2,c3] -> mkArc c1 c2 : (mkArc c2 c3 : as)) [] ts 
+--         ps = filter f2 (permutationsOfLength 2 cs)
+--         ts = filter f3 (permutationsOfLength 3 cs)
+-- 
+--         f3 [c1,c2,c3] = callDependency c1 c2 c3
+--         f3 _          = False -- less than 3 statements
+-- 
+--         f2 [c1,c2]    = pushDependency c1 c2
+--         f2 _          = False
+-- 
+-- mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
+-- mkArc p c = Arc p c $ pegIndex (stmtUID c) (stmtUID p)
+-- 
+-- arcsFrom :: CompStmt -> [CompStmt] -> [Arc CompStmt ()]
+-- arcsFrom src trc =  ((map (\tgt -> Arc src tgt ())) . (filter isPushArc) $ trc)
+--                  ++ ((map (\tgt -> Arc src tgt ())) . (filter isCall1Arc) $ trc)
+-- 
+--   where isPushArc = pushDependency src
+--         
+--         isCall1Arc = anyOf $ map (flip callDependency src) trc
+-- 
+--         isCall2Arc = anyOf $  apmap (map (callDependency2 src) trc) trc
+--                            ++ apmap (map (callDependency2' src) trc) trc
+-- 
+--         anyOf :: [a->Bool] -> a -> Bool
+--         anyOf ps x = or (map (\p -> p x) ps)
+-- 
+--         apmap :: [a->b] -> [a] -> [b]
+--         apmap fs xs = foldl (\acc f -> acc ++ (map f xs)) [] fs
+-- 
+-- nextStack :: CompStmt -> Stack
+-- nextStack rec = push (stmtLabel rec) (stmtStack rec)
+-- 
+-- pushDependency :: CompStmt -> CompStmt -> Bool
+-- pushDependency p c = nextStack p == stmtStack c
+-- 
+-- callDependency :: CompStmt -> CompStmt -> CompStmt -> Bool
+-- callDependency pApp pLam c = 
+--   stmtStack c == call (nextStack pApp) (nextStack pLam)
+-- 
+-- callDependency2 :: CompStmt -> CompStmt -> CompStmt -> CompStmt -> Bool
+-- callDependency2 pApp pApp' pLam' c = call (nextStack pApp) pLam == stmtStack c
+--   where pLam = call (nextStack pApp') (nextStack pLam')
+-- 
+-- callDependency2' :: CompStmt -> CompStmt -> CompStmt -> CompStmt -> Bool
+-- callDependency2' pApp1 pApp2 pLam c = call pApp (nextStack pLam) == stmtStack c
+--   where pApp = call (nextStack pApp1) (nextStack pApp2)
 
 --------------------------------------------------------------------------------
 -- Evaluate and display.
@@ -851,7 +901,7 @@ showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt l s i r) = r
         ++ "\n with stack " ++ show s
         ++ "\n with UIDs " ++ show i
-        ++ "\n with holes " ++ show (holes i)
+        -- ++ "\n with holes " ++ show (holes i)
 
 showArc :: Arc Vertex PegIndex -> String
 showArc (Arc _ _ i)  = show i
