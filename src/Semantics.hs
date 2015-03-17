@@ -2,7 +2,7 @@ module Semantics where
 
 import Control.Monad.State
 import Data.Graph.Libgraph
-import Data.List (sort,partition,permutations,nub,minimum,maximum)
+import Data.List (sort,partition,permutations,nub,minimum,maximum,(\\),find)
 import qualified Debug.Trace as Debug
 
 --------------------------------------------------------------------------------
@@ -615,6 +615,7 @@ data CompStmt
     , stmtStack  :: Stack
     , stmtUID    :: [UID]
     , stmtRepr   :: String
+    , stmtHoles  :: [Hole]
     }
   deriving (Show,Eq,Ord)
 
@@ -656,7 +657,7 @@ mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
                           $ filter (\e -> j == (parentUID . eventParent) e) chds)
 
 mkStmt :: EventForest -> Event -> CompStmt
-mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r
+mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r h
         where r = dfsFold Infix pre post "" Trunk (Just e) forest
               pre Nothing                      _ = (++" _")
               pre (Just (RootEvent l _ _))     _ = (++l)
@@ -677,14 +678,41 @@ mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r
               addUID (Just (AppEvent i _))        _ is = i : is
               nop    _                            _ is = is
 
+              h :: [Hole]
+              h = holes forest e
+
+treeUIDs :: EventForest -> Event -> [UID]
+treeUIDs forest root = reverse $ dfsFold Prefix addUID nop [] Trunk (Just root) forest
+  where addUID Nothing                      _ is = is
+        addUID (Just (RootEvent _ _ i))     _ is = i : is
+        addUID (Just (ConstEvent i _ _ _))  _ is = i : is
+        addUID (Just (LamEvent i _))        _ is = i : is
+        addUID (Just (AppEvent i _))        _ is = i : is
+        nop    _                            _ is = is
+
 data InfixOrPrefix = Infix | Prefix
 
-data WhereAmI = Trunk | ArgumentOf WhereAmI | ResultOf WhereAmI
+data Location = Trunk | ArgumentOf Location | ResultOf Location deriving Eq
 
-type Visit a = Maybe Event -> WhereAmI -> a -> a
+data ArgOrRes = Arg | Res
+
+-- Is the first location in the argument, or result subtree of the second location?
+argOrRes :: Location -> Location -> ArgOrRes
+argOrRes (ArgumentOf loc') loc = if loc == loc' then Arg else argOrRes loc' loc
+argOrRes (ResultOf loc')   loc = if loc == loc' then Res else argOrRes loc' loc
+argOrRes Trunk             _   = error $ "argOrRes: Second location is not on the path"
+                                       ++ "between root and the first location."
+
+-- 
+argNum :: Location -> Int
+argNum (ResultOf loc)   = 1 + (argNum loc)
+argNum (ArgumentOf loc) = argNum loc
+argNum Trunk            = 1
+
+type Visit a = Maybe Event -> Location -> a -> a
         
 dfsFold :: InfixOrPrefix -> Visit a -> Visit a -> a 
-        -> WhereAmI -> (Maybe Event) -> EventForest -> a
+        -> Location -> (Maybe Event) -> EventForest -> a
 
 dfsFold ip pre post z w me tree 
   = let z'  = pre me w z
@@ -714,37 +742,111 @@ dfsFold ip pre post z w me tree
                     z2 = pre me w z1
                 in       dfsFold ip pre post z2 (ResultOf w) (lookup 2 cs) tree
 
--- Note 1: An abstraction can be applied more than once. Lookup only finds the 
---         first, but we want to find and proccess all applications!
-
-
-
 --------------------------------------------------------------------------------
 -- Pegs and holes in event trees
 
-data Range = Range Int Int
+data Hole = ArgHole {argId :: Int, holeIds :: [UID] }
+          | ResHole {argId :: Int, holeIds :: [UID] }
+          deriving (Eq,Ord,Show)
 
-data Hole = PreArg Int Range
-          | InArg  Int Range
-          | PreRes Range
-          | InRes  Range
+(\\\) :: Hole -> Hole -> Hole
+(ArgHole i is) \\\ h = ArgHole i (is \\ holeIds h)
+(ResHole i is) \\\ h = ResHole i (is \\ holeIds h)
+
+(\\\\) :: [Hole] -> [Hole] -> [Hole]
+hs \\\\ ks = map (\h -> foldl (\h' k -> h' \\\ k) h ks) hs
+
+rmEmpty :: [Hole] -> [Hole]
+rmEmpty = filter (\h -> holeIds h /= [])
+
+data AppScope = Scope { appLocation :: Location 
+                      , argIds      :: [Int]
+                      , resIds      :: [Int]
+                      }
+
+newScope :: Location -> AppScope
+newScope l = Scope l [] []
+
+addToScopes :: [AppScope] -> Location -> Int -> [AppScope]
+addToScopes ss l i  = map add ss
+  where add s = case argOrRes l (appLocation s) of
+                  Arg -> s{argIds=i:argIds s}
+                  Res -> s{resIds=i:resIds s}
 
 holes :: EventForest -> Event -> [Hole]
 holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
-  where z :: ([Range],[Hole])
-        z = ([],[])
-    
-        pre :: Visit ([Range],[Hole])
-        pre (Just (RootEvent _ _ i))    w (r,h) = undefined
-        pre (Just (LamEvent i _))       w (r,h) = undefined
-        pre (Just (AppEvent i _))       w (r,h) = undefined
-        pre (Just (ConstEvent i _ _ l)) w (r,h) = undefined
-        pre Nothing                     w (r,h) = undefined
-    
-        post :: Visit ([Range],[Hole])
-        post = undefined
 
-depends = undefined
+  where z :: ([AppScope], [Hole])
+        z = ([],[])
+
+        -- On dfs previsit collect ids per subtree
+        pre :: Visit ([AppScope],[Hole])
+        pre (Just (RootEvent _ _ i))    l x       = x
+        pre (Just (LamEvent i _))       l (ss,hs) = (addToScopes ss l i, hs)
+        pre (Just (AppEvent i _))       l (ss,hs) = (newScope l:ss,hs)
+        pre (Just (ConstEvent i _ _ _)) l (ss,hs) = (addToScopes ss l i, hs)
+        pre Nothing                     l x       = x
+   
+        -- On dfs postvisit calculate holes using collected ids
+        post :: Visit ([AppScope],[Hole])
+        post (Just (RootEvent _ _ _))    _ x = x
+        post (Just (LamEvent _ _))       _ x = x
+        post (Just (AppEvent i _))       l ((Scope _ as rs):ss,hs) 
+               = let n = argNum l
+                     ha = ArgHole n [j | j <- [i+1 .. maximum as],        j `notElem` as]
+                     hr = ResHole n [j | j <- [(maximum as) + 1 .. maximum rs], j `notElem` rs]
+                 in (ss, ha:(hr:hs))
+        post (Just (ConstEvent _ _ _ _)) _ x = x
+        post Nothing                     _ x = x
+
+-- Infering dependencies from events
+
+type Dependency = (UID,UID)            -- Dependency between two trees (by their root events)
+type TreeDescr  = (Event,[UID],[Hole]) -- Root, UIDs and holes of a tree
+
+dependencies :: EventForest -> [Event] -> [Dependency]
+dependencies forest rs = loop hs []
+
+  where hs :: [TreeDescr]
+        hs = map (\r -> (r, treeUIDs forest r, resHoles forest r)) rs
+
+        loop :: [TreeDescr] -> [Dependency] -> [Dependency]
+        loop ts as = let ts' = map (\(e,is,hs) -> (e,is,rmEmpty hs)) ts'
+                     in if all (\(e,is,hs) -> case hs of [] -> True; _ -> False) ts'
+                        then as
+                        else let (ts'',a) = oneDependency ts' in loop ts'' (a:as)
+
+
+-- Find a list of holes between arguments and result
+resHoles :: EventForest -> Event -> [Hole]
+resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) . (holes forest)
+
+
+-- Resolve the first dependency for which we find a matching hole/peg pair, and remove
+-- the hole and any overlapping holes between parent/child from the parent.
+oneDependency :: [TreeDescr] -> ([TreeDescr], (UID, UID))
+oneDependency ts = (ts', (eventUID e, eventUID e_p))
+       
+  where -- The first TreeDescr with a hole left
+        (e,is,hs) = case find (\(_,_,hs) -> hs /= []) ts of
+                        (Just t) -> t
+                        Nothing  -> error "oneDependency: No more holes left?"
+
+        -- The last hole in the TreeDescr
+        h = case (last hs) of (ResHole _ xs) -> last xs
+
+        -- The TreeDescr with the peg that fits the hole
+        (e_p,is_p,hs_p) = dependency ts h
+
+        -- Remove overlapping holes from parent
+        ts' :: [TreeDescr]
+        ts' = map (\(e',is',hs') -> if e' == e then (e,is, hs \\\\ hs_p) else (e',is',hs')) ts
+
+-- Given a hole, find TreeDescr with mathing peg
+dependency :: [TreeDescr] -> UID -> TreeDescr
+dependency ts h = case filter (\(_,pegs,_) -> h `elem` pegs) ts of
+                     []    -> error "dependencies: A UID disappeared!"
+                     (t:_) -> t
 
 ---   --------------------------------------------------------------------------------
 ---   -- Pegs and holes on ranges (doesn't quite do the trick)
@@ -794,7 +896,7 @@ mkGraph' trace
   | length trace < 1 = error "mkGraph: empty trace"
   | otherwise = Graph (head trace) -- doesn't really matter, replaced above
                        trace
-                       (nub $ mkArcs trace)
+                       [] -- TODO (nub $ mkArcs trace)
 
 mkVertex :: CompStmt -> Vertex
 mkVertex c = Vertex [c]
@@ -810,17 +912,17 @@ combinations k xs = combinations' (length xs) k xs
                         ++ combinations' (n - 1) k' ys
 
 
-permutationsOfLength :: Int -> [a] -> [[a]]
-permutationsOfLength x = (foldl (++) []) . (map permutations) . (combinations x)
-
-
-mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
-mkArcs trc = map (\(src,tgt) -> mkArc src tgt) [(src,tgt) | src <- trc, tgt <- trc, depends (stmtUID tgt) (stmtUID src)]
-
-
-mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
-mkArc p c = Arc p c pegIndex
-  where pegIndex = -1 -- TODO
+-- permutationsOfLength :: Int -> [a] -> [[a]]
+-- permutationsOfLength x = (foldl (++) []) . (map permutations) . (combinations x)
+-- 
+-- 
+-- mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
+-- mkArcs trc = map (\(src,tgt) -> mkArc src tgt) [(src,tgt) | src <- trc, tgt <- trc, depends (stmtUID tgt) (stmtUID src)]
+-- 
+-- 
+-- mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
+-- mkArc p c = Arc p c pegIndex
+--   where pegIndex = -1 -- TODO
 
 -- mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
 -- mkArcs cs = callArcs ++ pushArcs
@@ -898,10 +1000,10 @@ showVertex' RootVertex  = "Root"
 showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
-showCompStmt (CompStmt l s i r) = r
+showCompStmt (CompStmt l s i r h) = r
         ++ "\n with stack " ++ show s
-        ++ "\n with UIDs " ++ show i
-        -- ++ "\n with holes " ++ show (holes i)
+        ++ "\n with UIDs "  ++ show i
+        ++ "\n with holes " ++ show h
 
 showArc :: Arc Vertex PegIndex -> String
 showArc (Arc _ _ i)  = show i
