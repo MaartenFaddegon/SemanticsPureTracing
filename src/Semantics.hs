@@ -643,18 +643,26 @@ doTrace rec = do
 -- to a child event.
 type EventForest = [(UID, [(Int, Event)])]
 
-mkStmts :: (Expr,Trace) -> (Expr,[CompStmt])
-mkStmts (reduct,trc) = (reduct,map (mkStmt events) roots)
+mkEventForest :: Trace -> EventForest
+mkEventForest trc = map children trc
+  where children e = let j = eventUID e
+                     in (j, map    (\c -> (parentPosition . eventParent $ c, c))
+                          $ filter (\e -> j == (parentUID . eventParent) e) chds)
+
+        (roots,chds) = partition isRoot trc
+        isRoot (RootEvent _ _ _) = True
+        isRoot _                 = False
+
+
+mkStmts :: (Expr,Trace) -> (Expr,Trace,[CompStmt])
+mkStmts (reduct,trc) = (reduct,trc, map (mkStmt forest) roots)
 
   where isRoot (RootEvent _ _ _) = True
         isRoot _                 = False
         (roots,chds) = partition isRoot trc
 
-        events :: EventForest
-        events = map children trc
-        children e = let j = eventUID e
-                     in (j, map    (\c -> (parentPosition . eventParent $ c, c))
-                          $ filter (\e -> j == (parentUID . eventParent) e) chds)
+        forest :: EventForest
+        forest = mkEventForest trc
 
 mkStmt :: EventForest -> Event -> CompStmt
 mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r h
@@ -749,12 +757,16 @@ data Hole = ArgHole {argId :: Int, holeIds :: [UID] }
           | ResHole {argId :: Int, holeIds :: [UID] }
           deriving (Eq,Ord,Show)
 
+delIds :: Hole -> [UID] -> Hole
+delIds (ArgHole i is) js = ArgHole i (is \\ js)
+delIds (ResHole i is) js = ResHole i (is \\ js)
+
 (\\\) :: Hole -> Hole -> Hole
-(ArgHole i is) \\\ h = ArgHole i (is \\ holeIds h)
-(ResHole i is) \\\ h = ResHole i (is \\ holeIds h)
+h \\\ k = delIds h (holeIds k)
 
 (\\\\) :: [Hole] -> [Hole] -> [Hole]
 hs \\\\ ks = map (\h -> foldl (\h' k -> h' \\\ k) h ks) hs
+
 
 rmEmpty :: [Hole] -> [Hole]
 rmEmpty = filter (\h -> holeIds h /= [])
@@ -804,17 +816,20 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
 type Dependency = (UID,UID)            -- Dependency between two trees (by their root events)
 type TreeDescr  = (Event,[UID],[Hole]) -- Root, UIDs and holes of a tree
 
-dependencies :: EventForest -> [Event] -> [Dependency]
-dependencies forest rs = loop hs []
+dependencies :: EventForest -> Trace -> [Dependency]
+dependencies forest rs = loop ts0 []
+                         -- [snd . oneDependency . map (\(e,is,hs) -> (e,is,rmEmpty hs)) $ hs]
 
-  where hs :: [TreeDescr]
-        hs = map (\r -> (r, treeUIDs forest r, resHoles forest r)) rs
+  where ts0 :: [TreeDescr]
+        ts0 = map (\r -> (r, treeUIDs forest r, resHoles forest r)) rs
 
         loop :: [TreeDescr] -> [Dependency] -> [Dependency]
-        loop ts as = let ts' = map (\(e,is,hs) -> (e,is,rmEmpty hs)) ts'
+        loop ts as = let ts' = map (\(e,is,hs) -> (e,is,rmEmpty hs)) ts
                      in if all (\(e,is,hs) -> case hs of [] -> True; _ -> False) ts'
                         then as
-                        else let (ts'',a) = oneDependency ts' in loop ts'' (a:as)
+                        else let (ts'',a) = oneDependency ts' 
+                             in  if ts'' == ts' then error "dependencies got stuck"
+                                                else loop ts'' (a:as)
 
 
 -- Find a list of holes between arguments and result
@@ -833,14 +848,17 @@ oneDependency ts = (ts', (eventUID e, eventUID e_p))
                         Nothing  -> error "oneDependency: No more holes left?"
 
         -- The last hole in the TreeDescr
+        h :: UID
         h = case (last hs) of (ResHole _ xs) -> last xs
 
         -- The TreeDescr with the peg that fits the hole
         (e_p,is_p,hs_p) = dependency ts h
 
-        -- Remove overlapping holes from parent
+        -- Remove the hole used to match, and overlapping holes
         ts' :: [TreeDescr]
-        ts' = map (\(e',is',hs') -> if e' == e then (e,is, hs \\\\ hs_p) else (e',is',hs')) ts
+        ts' = map (\(x,y,z) -> if e == x then (e,is, map (flip delIds [h]) $ hs \\\\ hs_p)
+                                         else (x,y,z)) ts
+
 
 -- Given a hole, find TreeDescr with mathing peg
 dependency :: [TreeDescr] -> UID -> TreeDescr
@@ -885,32 +903,41 @@ data Vertex = RootVertex | Vertex [CompStmt] deriving (Eq)
 type CompGraph = Graph Vertex PegIndex
 type PegIndex = Int
 
-mkGraph :: (Expr,[CompStmt]) -> (Expr,CompGraph)
-mkGraph (reduct,trc) = let (Graph _ vs as) = mapGraph mkVertex (mkGraph' trc)
-                           rs              = filter (\(Vertex [c]) -> stmtStack c == []) vs
-                           as'             = map (\r -> Arc RootVertex r 0) rs
-                       in (reduct, Graph RootVertex (RootVertex:vs) (as' ++ as))
+mkGraph :: (Expr,Trace,[CompStmt]) -> (Expr,CompGraph)
+mkGraph (reduct,trc,cs) = let (Graph _ vs as) = mapGraph mkVertex (mkGraph' trc cs)
+                              rs              = filter (\(Vertex [c]) -> stmtStack c == []) vs
+                              as'             = map (\r -> Arc RootVertex r 0) rs
+                          in (reduct, Graph RootVertex (RootVertex:vs) (as' ++ as))
 
-mkGraph' :: [CompStmt] -> Graph CompStmt PegIndex
-mkGraph' trace
-  | length trace < 1 = error "mkGraph: empty trace"
-  | otherwise = Graph (head trace) -- doesn't really matter, replaced above
-                       trace
-                       [] -- TODO (nub $ mkArcs trace)
+mkGraph' :: Trace -> [CompStmt] -> Graph CompStmt PegIndex
+mkGraph' trc cs
+  | length cs < 1 = error "mkGraph: no computation statements?"
+  | otherwise = Graph (head cs) -- doesn't really matter, replaced above
+                      cs
+                      (mkArcs trc cs)
 
 mkVertex :: CompStmt -> Vertex
 mkVertex c = Vertex [c]
 
--- Implementation of combinations function taken from http://stackoverflow.com/a/22577148/2424911
-combinations :: Int -> [a] -> [[a]]
-combinations k xs = combinations' (length xs) k xs
-  where combinations' n k' l@(y:ys)
-          | k' == 0   = [[]]
-          | k' >= n   = [l]
-          | null l    = []
-          | otherwise = map (y :) (combinations' (n - 1) (k' - 1) ys) 
-                        ++ combinations' (n - 1) k' ys
+mkArcs :: Trace -> [CompStmt] -> [Arc CompStmt PegIndex]
+mkArcs trc cs = map (\(i,j) -> mkArc (findC i) (findC j)) ds
+  where forest  = mkEventForest trc
+        ds      = dependencies forest trc
+        findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c
 
+mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
+mkArc p c = Arc p c 0 -- $ pegIndex (stmtUID c) (stmtUID p)
+
+-- -- Implementation of combinations function taken from http://stackoverflow.com/a/22577148/2424911
+-- combinations :: Int -> [a] -> [[a]]
+-- combinations k xs = combinations' (length xs) k xs
+--   where combinations' n k' l@(y:ys)
+--           | k' == 0   = [[]]
+--           | k' >= n   = [l]
+--           | null l    = []
+--           | otherwise = map (y :) (combinations' (n - 1) (k' - 1) ys) 
+--                         ++ combinations' (n - 1) k' ys
+-- 
 
 -- permutationsOfLength :: Int -> [a] -> [[a]]
 -- permutationsOfLength x = (foldl (++) []) . (map permutations) . (combinations x)
