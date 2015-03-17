@@ -818,7 +818,6 @@ type TreeDescr  = (Event,[UID],[Hole]) -- Root, UIDs and holes of a tree
 
 dependencies :: EventForest -> Trace -> [Dependency]
 dependencies forest rs = loop ts0 []
-                         -- [snd . oneDependency . map (\(e,is,hs) -> (e,is,rmEmpty hs)) $ hs]
 
   where ts0 :: [TreeDescr]
         ts0 = map (\r -> (r, treeUIDs forest r, resHoles forest r)) rs
@@ -839,7 +838,7 @@ resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) .
 -- Resolve the first dependency for which we find a matching hole/peg pair, and remove
 -- the hole and any overlapping holes between parent/child from the parent.
 oneDependency :: [TreeDescr] -> ([TreeDescr], Dependency)
-oneDependency ts = (ts', (eventUID e, eventUID e_p, h))
+oneDependency ts = (rmOverlap ts (e,is,hs) (e_p,is_p,hs_p), (eventUID e, eventUID e_p, h))
        
   where -- The first TreeDescr with a hole left
         (e,is,hs) = case find (\(_,_,hs) -> hs /= []) ts of
@@ -853,15 +852,17 @@ oneDependency ts = (ts', (eventUID e, eventUID e_p, h))
         -- The TreeDescr with the peg that fits the hole
         (e_p,is_p,hs_p) = dependency ts h
 
-        -- Remove the hole used to match, and overlapping holes
-        ts' :: [TreeDescr]
-        ts' = map (\(x,y,z) -> if e == x then (e,is, map (flip delIds [h]) $ hs \\\\ hs_p)
-                                         else (x,y,z)) ts
+rmOverlap :: [TreeDescr] -> TreeDescr -> TreeDescr -> [TreeDescr]
+rmOverlap ts t_h t_p = map (\t -> if t == t_h then rmOverlap1 t_h t_p else t) ts
+
+rmOverlap1 :: TreeDescr -> TreeDescr -> TreeDescr
+rmOverlap1 (e,is,hs) (e',is',hs') = (e,is, Debug.trace ("rmOverlap-" ++ (show . head) is ++ " " ++ show hs ++ " = " ++ show new_hs) new_hs)
+  where new_hs = map (flip delIds is') hs \\\\ hs'
 
 -- Given a hole, find TreeDescr with mathing peg
 dependency :: [TreeDescr] -> UID -> TreeDescr
 dependency ts h = case filter (\(_,pegs,_) -> h `elem` pegs) ts of
-                     []    -> error "dependencies: A UID disappeared!"
+                     []    -> error "dependency: A UID disappeared!"
                      (t:_) -> t
 
 --------------------------------------------------------------------------------
@@ -890,8 +891,12 @@ mkVertex c = Vertex [c]
 mkArcs :: Trace -> [CompStmt] -> [Arc CompStmt PegIndex]
 mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
   where forest  = mkEventForest trc
-        ds      = dependencies forest trc
+        ds      = dependencies forest roots
         findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c
+
+        (roots,chds) = partition isRoot trc
+        isRoot (RootEvent _ _ _) = True
+        isRoot _                 = False
 
 --------------------------------------------------------------------------------
 -- Evaluate and display.

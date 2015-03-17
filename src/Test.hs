@@ -1,3 +1,3 @@
 import Semantics
 
-main = print "TODO"
+main = disp ex5a

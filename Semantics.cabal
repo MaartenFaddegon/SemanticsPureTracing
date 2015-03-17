@@ -12,4 +12,3 @@ Executable Semantics-test
   main-is:           Test.hs
   other-modules:     Semantics
   default-language:  Haskell2010
-  ghc-prof-options:  -auto-all
