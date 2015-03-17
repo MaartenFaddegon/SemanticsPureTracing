@@ -813,18 +813,21 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
 
 -- Infering dependencies from events
 
-type Dependency = (UID,UID,UID)        -- Parent-root UID, Child-root UID, hole/peg UID
-type TreeDescr  = (Event,[UID],[Hole]) -- Root, UIDs and holes of a tree
+type Dependency = (UID,UID,UID)              -- Parent-root UID, Child-root UID, hole/peg UID
+type TreeDescr  = (Event  -- Root event
+                  ,[UID]  -- UIDs of events in this tree
+                  ,[Hole] -- Holes in the event UIDs
+                  ,[UID]) -- Inherited UIDs (of child events)
 
 dependencies :: EventForest -> Trace -> [Dependency]
 dependencies forest rs = loop ts0 []
 
   where ts0 :: [TreeDescr]
-        ts0 = map (\r -> (r, treeUIDs forest r, resHoles forest r)) rs
+        ts0 = map (\r -> let is = treeUIDs forest r in (r, is, resHoles forest r,is)) rs
 
         loop :: [TreeDescr] -> [Dependency] -> [Dependency]
-        loop ts as = let ts' = map (\(e,is,hs) -> (e,is,rmEmpty hs)) ts
-                     in if all (\(e,is,hs) -> case hs of [] -> True; _ -> False) ts'
+        loop ts as = let ts' = map (\(e,is,hs,js) -> (e,is,rmEmpty hs,js)) ts
+                     in if all (\(_,_,hs,_) -> case hs of [] -> True; _ -> False) ts'
                         then as
                         else let (ts'',a) = oneDependency ts' 
                              in  if ts'' == ts' then error "dependencies got stuck"
@@ -838,30 +841,31 @@ resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) .
 -- Resolve the first dependency for which we find a matching hole/peg pair, and remove
 -- the hole and any overlapping holes between parent/child from the parent.
 oneDependency :: [TreeDescr] -> ([TreeDescr], Dependency)
-oneDependency ts = (rmOverlap ts (e,is,hs) (e_p,is_p,hs_p), (eventUID e, eventUID e_p, h))
+oneDependency ts = (rmOverlap ts (e,is,hs,js) (e_p,is_p,hs_p,js_p), (eventUID e, eventUID e_p, h))
        
   where -- The first TreeDescr with a hole left
-        (e,is,hs) = case find (\(_,_,hs) -> hs /= []) ts of
-                        (Just t) -> t
-                        Nothing  -> error "oneDependency: No more holes left?"
+        (e,is,hs,js) = case find (\(_,_,hs,_) -> hs /= []) ts of
+                         (Just t) -> t
+                         Nothing  -> error "oneDependency: No more holes left?"
 
         -- The last hole in the TreeDescr
         h :: UID
         h = case (last hs) of (ResHole _ xs) -> last xs
 
         -- The TreeDescr with the peg that fits the hole
-        (e_p,is_p,hs_p) = dependency ts h
+        (e_p,is_p,hs_p,js_p) = dependency ts h
 
 rmOverlap :: [TreeDescr] -> TreeDescr -> TreeDescr -> [TreeDescr]
 rmOverlap ts t_h t_p = map (\t -> if t == t_h then rmOverlap1 t_h t_p else t) ts
 
 rmOverlap1 :: TreeDescr -> TreeDescr -> TreeDescr
-rmOverlap1 (e,is,hs) (e',is',hs') = (e,is, Debug.trace ("rmOverlap-" ++ (show . head) is ++ " " ++ show hs ++ " = " ++ show new_hs) new_hs)
-  where new_hs = map (flip delIds is') hs \\\\ hs'
+rmOverlap1 (e,is,hs,js) (e',is',hs',js') = (e,is,new_hs,new_js)
+  where new_hs = map (flip delIds $ is' ++ js') hs \\\\ hs'
+        new_js = nub (js ++ js')
 
 -- Given a hole, find TreeDescr with mathing peg
 dependency :: [TreeDescr] -> UID -> TreeDescr
-dependency ts h = case filter (\(_,pegs,_) -> h `elem` pegs) ts of
+dependency ts h = case filter (\(_,pegs,_,_) -> h `elem` pegs) ts of
                      []    -> error "dependency: A UID disappeared!"
                      (t:_) -> t
 
