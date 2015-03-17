@@ -813,7 +813,7 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
 
 -- Infering dependencies from events
 
-type Dependency = (UID,UID)            -- Dependency between two trees (by their root events)
+type Dependency = (UID,UID,UID)        -- Parent-root UID, Child-root UID, hole/peg UID
 type TreeDescr  = (Event,[UID],[Hole]) -- Root, UIDs and holes of a tree
 
 dependencies :: EventForest -> Trace -> [Dependency]
@@ -831,7 +831,6 @@ dependencies forest rs = loop ts0 []
                              in  if ts'' == ts' then error "dependencies got stuck"
                                                 else loop ts'' (a:as)
 
-
 -- Find a list of holes between arguments and result
 resHoles :: EventForest -> Event -> [Hole]
 resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) . (holes forest)
@@ -839,8 +838,8 @@ resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) .
 
 -- Resolve the first dependency for which we find a matching hole/peg pair, and remove
 -- the hole and any overlapping holes between parent/child from the parent.
-oneDependency :: [TreeDescr] -> ([TreeDescr], (UID, UID))
-oneDependency ts = (ts', (eventUID e, eventUID e_p))
+oneDependency :: [TreeDescr] -> ([TreeDescr], Dependency)
+oneDependency ts = (ts', (eventUID e, eventUID e_p, h))
        
   where -- The first TreeDescr with a hole left
         (e,is,hs) = case find (\(_,_,hs) -> hs /= []) ts of
@@ -859,42 +858,11 @@ oneDependency ts = (ts', (eventUID e, eventUID e_p))
         ts' = map (\(x,y,z) -> if e == x then (e,is, map (flip delIds [h]) $ hs \\\\ hs_p)
                                          else (x,y,z)) ts
 
-
 -- Given a hole, find TreeDescr with mathing peg
 dependency :: [TreeDescr] -> UID -> TreeDescr
 dependency ts h = case filter (\(_,pegs,_) -> h `elem` pegs) ts of
                      []    -> error "dependencies: A UID disappeared!"
                      (t:_) -> t
-
----   --------------------------------------------------------------------------------
----   -- Pegs and holes on ranges (doesn't quite do the trick)
----   
----   holes :: [Int] -> [Int]
----   holes js = [i | i <- [(minimum js) .. (maximum js)], i `notElem` js]
----   
----   pegs :: [Int] -> [Int] -> [Int]
----   pegs js ks = [i | i <- holes js, i `elem` ks]
----   
----   pegIndex :: [Int] -> [Int] -> Int
----   pegIndex js ks = case pegs js ks of
----     []    -> -1 -- error "pegIndex: no peg found in parent statement"
----     (p:_) -> length (takeWhile (/= p) ks)
----   
----   -- compareRel :: [Int] -> [Int] -> [Int] -> Ordering
----   -- compareRel j1s j2s ks = compare (pegIndex j1s ks) (pegIndex j2s ks)
----   
----   encloses :: [Int] -> [Int] -> Bool
----   encloses js ks = (minimum js) < (minimum ks) && (maximum js) > (maximum ks)
----   
----   perfectFit :: [Int] -> [Int] -> Bool
----   perfectFit js ks = all (\j -> j `elem` ks) (holes js)
----   
----   fits js ks = case holes js of
----     [] -> False
----     hs -> last hs `elem` ks
----   
----   depends :: [Int] -> [Int] -> Bool
----   depends ks js = fits js ks && not (encloses ks js)
 
 --------------------------------------------------------------------------------
 -- Debug
@@ -920,87 +888,10 @@ mkVertex :: CompStmt -> Vertex
 mkVertex c = Vertex [c]
 
 mkArcs :: Trace -> [CompStmt] -> [Arc CompStmt PegIndex]
-mkArcs trc cs = map (\(i,j) -> mkArc (findC i) (findC j)) ds
+mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
   where forest  = mkEventForest trc
         ds      = dependencies forest trc
         findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c
-
-mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
-mkArc p c = Arc p c 0 -- $ pegIndex (stmtUID c) (stmtUID p)
-
--- -- Implementation of combinations function taken from http://stackoverflow.com/a/22577148/2424911
--- combinations :: Int -> [a] -> [[a]]
--- combinations k xs = combinations' (length xs) k xs
---   where combinations' n k' l@(y:ys)
---           | k' == 0   = [[]]
---           | k' >= n   = [l]
---           | null l    = []
---           | otherwise = map (y :) (combinations' (n - 1) (k' - 1) ys) 
---                         ++ combinations' (n - 1) k' ys
--- 
-
--- permutationsOfLength :: Int -> [a] -> [[a]]
--- permutationsOfLength x = (foldl (++) []) . (map permutations) . (combinations x)
--- 
--- 
--- mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
--- mkArcs trc = map (\(src,tgt) -> mkArc src tgt) [(src,tgt) | src <- trc, tgt <- trc, depends (stmtUID tgt) (stmtUID src)]
--- 
--- 
--- mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
--- mkArc p c = Arc p c pegIndex
---   where pegIndex = -1 -- TODO
-
--- mkArcs :: [CompStmt] -> [Arc CompStmt PegIndex]
--- mkArcs cs = callArcs ++ pushArcs
---   where pushArcs = map (\[c1,c2] -> mkArc c1 c2) ps 
---         callArcs = foldl (\as [c1,c2,c3] -> mkArc c1 c2 : (mkArc c2 c3 : as)) [] ts 
---         ps = filter f2 (permutationsOfLength 2 cs)
---         ts = filter f3 (permutationsOfLength 3 cs)
--- 
---         f3 [c1,c2,c3] = callDependency c1 c2 c3
---         f3 _          = False -- less than 3 statements
--- 
---         f2 [c1,c2]    = pushDependency c1 c2
---         f2 _          = False
--- 
--- mkArc :: CompStmt -> CompStmt -> Arc CompStmt PegIndex
--- mkArc p c = Arc p c $ pegIndex (stmtUID c) (stmtUID p)
--- 
--- arcsFrom :: CompStmt -> [CompStmt] -> [Arc CompStmt ()]
--- arcsFrom src trc =  ((map (\tgt -> Arc src tgt ())) . (filter isPushArc) $ trc)
---                  ++ ((map (\tgt -> Arc src tgt ())) . (filter isCall1Arc) $ trc)
--- 
---   where isPushArc = pushDependency src
---         
---         isCall1Arc = anyOf $ map (flip callDependency src) trc
--- 
---         isCall2Arc = anyOf $  apmap (map (callDependency2 src) trc) trc
---                            ++ apmap (map (callDependency2' src) trc) trc
--- 
---         anyOf :: [a->Bool] -> a -> Bool
---         anyOf ps x = or (map (\p -> p x) ps)
--- 
---         apmap :: [a->b] -> [a] -> [b]
---         apmap fs xs = foldl (\acc f -> acc ++ (map f xs)) [] fs
--- 
--- nextStack :: CompStmt -> Stack
--- nextStack rec = push (stmtLabel rec) (stmtStack rec)
--- 
--- pushDependency :: CompStmt -> CompStmt -> Bool
--- pushDependency p c = nextStack p == stmtStack c
--- 
--- callDependency :: CompStmt -> CompStmt -> CompStmt -> Bool
--- callDependency pApp pLam c = 
---   stmtStack c == call (nextStack pApp) (nextStack pLam)
--- 
--- callDependency2 :: CompStmt -> CompStmt -> CompStmt -> CompStmt -> Bool
--- callDependency2 pApp pApp' pLam' c = call (nextStack pApp) pLam == stmtStack c
---   where pLam = call (nextStack pApp') (nextStack pLam')
--- 
--- callDependency2' :: CompStmt -> CompStmt -> CompStmt -> CompStmt -> Bool
--- callDependency2' pApp1 pApp2 pLam c = call pApp (nextStack pLam) == stmtStack c
---   where pApp = call (nextStack pApp1) (nextStack pApp2)
 
 --------------------------------------------------------------------------------
 -- Evaluate and display.
