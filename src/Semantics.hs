@@ -791,6 +791,8 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
   where z :: ([AppScope], [Hole])
         z = ([],[])
 
+        uids = treeUIDs forest root
+
         -- On dfs previsit collect ids per subtree
         pre :: Visit ([AppScope],[Hole])
         pre (Just (RootEvent _ _ i))    l x       = x
@@ -805,8 +807,9 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
         post (Just (LamEvent _ _))       _ x = x
         post (Just (AppEvent i _))       l ((Scope _ as rs):ss,hs) 
                = let n = argNum l
-                     ha = ArgHole n [j | j <- [i+1 .. maximum as],        j `notElem` as]
-                     hr = ResHole n [j | j <- [(maximum as) + 1 .. maximum rs], j `notElem` rs]
+                     ha = ArgHole n [j | j <- [i+1 .. maximum as], j `notElem` uids]
+                     hr = let m = minimum [(maximum as) + 1, minimum rs] in
+                          ResHole n [j | j <- [m .. maximum rs], j `notElem` uids]
                  in (ss, ha:(hr:hs))
         post (Just (ConstEvent _ _ _ _)) _ x = x
         post Nothing                     _ x = x
