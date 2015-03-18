@@ -622,7 +622,7 @@ data CompStmt
 type UID = Int
 type ParentPosition = Int
 
-data Parent = Parent {parentUID :: UID,  parentPosition :: Int} 
+data Parent = Parent {parentUID :: UID,  parentPosition :: ParentPosition} 
               deriving (Show,Eq,Ord)
 
 getUniq :: State Context UID
@@ -687,7 +687,7 @@ mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r h
               nop    _                            _ is = is
 
               h :: [Hole]
-              h = holes forest e
+              h = resHoles forest e
 
 treeUIDs :: EventForest -> Event -> [UID]
 treeUIDs forest root = reverse $ dfsFold Prefix addUID nop [] Trunk (Just root) forest
@@ -718,37 +718,54 @@ argNum (ArgumentOf loc) = argNum loc
 argNum Trunk            = 1
 
 type Visit a = Maybe Event -> Location -> a -> a
+
+-- Given an event, return the list of (expected) children in depth-first order.
+--
+-- Nothing indicates that we expect an event (e.g. the argument of an application-
+-- event) but it was not there.
+--
+-- An abstraction (LamEvent) can have more than one application. There is no
+-- particular ordering and we just return the applications (AppEvents) in the
+-- order we find them in the trace (i.e. evaluation order).
+
+dfsChildren :: EventForest -> Event -> [Maybe Event]
+dfsChildren forest e = case e of
+    (RootEvent _ _ i)    -> byPosition [1]
+    (ConstEvent i _ _ l) -> byPosition [1..l]
+    (LamEvent i _)       -> map (Just . snd) cs
+    (AppEvent i _)       -> byPosition [1,2]
+
+  where -- Find list of events by position
+        byPosition :: [ParentPosition] -> [Maybe Event]
+        byPosition = map (\pos -> lookup pos cs)
+
+        -- Events in the forest that list our event as parent (in no particular order).
+        cs :: [(ParentPosition,Event)]
+        cs = case lookup (eventUID e) forest of (Just cs') -> cs'; _ -> []
+
         
 dfsFold :: InfixOrPrefix -> Visit a -> Visit a -> a 
         -> Location -> (Maybe Event) -> EventForest -> a
 
-dfsFold ip pre post z w me tree 
-  = let z'  = pre me w z
-        cs  = case me of (Just e) -> case lookup (eventUID e) tree of (Just cs) -> cs
-                                                                      Nothing   -> []
-                         Nothing  -> []
+dfsFold ip pre post z w me forest 
+  = post me w $ case me of
+      Nothing -> z'
 
-        -- Fold over each child found via the list of parentPositions ds
-        csFold ds = foldl (\z'' (d,w') -> dfsFold ip pre post z'' w' (lookup d cs) tree) z' ds
+      (Just (AppEvent _ _)) -> let [arg,res] = cs
+        in case ip of
+          Prefix -> csFold $ zip cs [ArgumentOf w,ResultOf w]
+          Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf w) arg forest
+                        z2 = pre me w z1
+                    in  dfsFold ip pre post z2 (ResultOf w) res forest
 
-        -- Fold over all applications of a lambda
-        csFoldMany w' = let mes = (lookupMany 1)
-                        in foldl (\z'' me -> dfsFold ip pre post z'' w' me tree) z' mes
+      _ -> csFold $ zip cs (repeat w)
 
-        lookupMany :: ParentPosition -> [Maybe Event]
-        lookupMany d  = (map (Just) . (map snd) . (filter (\(b,_) -> b == d))) cs
+  where z'  = pre me w z
 
+        cs :: [Maybe Event]
+        cs = case me of (Just e) -> dfsChildren forest e
 
-  in post me w $ case me of
-    Nothing                     -> z'
-    (Just (RootEvent _ _ i))    -> csFold [(1,w)]
-    (Just (ConstEvent i _ _ l)) -> csFold $ zip [1..l] (repeat w)
-    (Just (LamEvent i _))       -> csFoldMany w
-    (Just (AppEvent i _))       -> case ip of
-      Prefix -> csFold [(1,ArgumentOf w),(2,ResultOf w)]
-      Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf w) (lookup 1 cs) tree
-                    z2 = pre me w z1
-                in       dfsFold ip pre post z2 (ResultOf w) (lookup 2 cs) tree
+        csFold = foldl (\z'' (c,w') -> dfsFold ip pre post z'' w' c forest) z'
 
 --------------------------------------------------------------------------------
 -- Pegs and holes in event trees
@@ -826,7 +843,7 @@ dependencies :: EventForest -> Trace -> [Dependency]
 dependencies forest rs = loop ts0 []
 
   where ts0 :: [TreeDescr]
-        ts0 = map (\r -> let is = treeUIDs forest r in (r, is, resHoles forest r,is)) rs
+        ts0 = map (\r -> let is = treeUIDs forest r in (r, is, [last $ resHoles forest r], is)) rs
 
         loop :: [TreeDescr] -> [Dependency] -> [Dependency]
         loop ts as = let ts' = map (\(e,is,hs,js) -> (e,is,rmEmpty hs,js)) ts
