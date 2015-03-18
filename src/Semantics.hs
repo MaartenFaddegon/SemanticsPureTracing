@@ -687,7 +687,7 @@ mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r h
               nop    _                            _ is = is
 
               h :: [Hole]
-              h = resHoles forest e
+              h = holes forest e
 
 treeUIDs :: EventForest -> Event -> [UID]
 treeUIDs forest root = reverse $ dfsFold Prefix addUID nop [] Trunk (Just root) forest
@@ -770,13 +770,12 @@ dfsFold ip pre post z w me forest
 --------------------------------------------------------------------------------
 -- Pegs and holes in event trees
 
-data Hole = ArgHole {argId :: Int, holeIds :: [UID] }
-          | ResHole {argId :: Int, holeIds :: [UID] }
-          deriving (Eq,Ord,Show)
+data Hole = Hole { holeIds :: [UID] } deriving (Eq,Ord,Show)
 
 delIds :: Hole -> [UID] -> Hole
-delIds (ArgHole i is) js = ArgHole i (is \\ js)
-delIds (ResHole i is) js = ResHole i (is \\ js)
+delIds (Hole is) js = Hole (is \\ js)
+-- delIds (ArgHole i is) js = ArgHole i (is \\ js)
+-- delIds (ResHole i is) js = ResHole i (is \\ js)
 
 (\\\) :: Hole -> Hole -> Hole
 h \\\ k = delIds h (holeIds k)
@@ -812,24 +811,31 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
 
         -- On dfs previsit collect ids per subtree
         pre :: Visit ([AppScope],[Hole])
+        pre Nothing                     l x       = x
+        pre (Just (ConstEvent i _ _ _)) l (ss,hs) = (addToScopes ss l i, hs)
         pre (Just (RootEvent _ _ i))    l x       = x
         pre (Just (LamEvent i _))       l (ss,hs) = (addToScopes ss l i, hs)
-        pre (Just (AppEvent i _))       l (ss,hs) = (newScope l:ss,hs)
-        pre (Just (ConstEvent i _ _ _)) l (ss,hs) = (addToScopes ss l i, hs)
-        pre Nothing                     l x       = x
+        pre (Just e@(AppEvent i _))     l (ss,hs)
+          | hasFinalRes e = (newScope l:ss,hs)
+          | otherwise     = (addToScopes ss l i, hs)
    
         -- On dfs postvisit calculate holes using collected ids
         post :: Visit ([AppScope],[Hole])
+        post Nothing                     _ x = x
+        post (Just (ConstEvent _ _ _ _)) _ x = x
         post (Just (RootEvent _ _ _))    _ x = x
         post (Just (LamEvent _ _))       _ x = x
-        post (Just (AppEvent i _))       l ((Scope _ as rs):ss,hs) 
-               = let n = argNum l
-                     ha = ArgHole n [j | j <- [i+1 .. maximum as], j `notElem` uids]
-                     hr = let m = minimum [(maximum as) + 1, minimum rs] in
-                          ResHole n [j | j <- [m .. maximum rs], j `notElem` uids]
-                 in (ss, ha:(hr:hs))
-        post (Just (ConstEvent _ _ _ _)) _ x = x
-        post Nothing                     _ x = x
+        post (Just e@(AppEvent i _))     l x
+          | hasFinalRes e  = let ((Scope _ as rs):ss,hs)  = x
+                                 m = minimum [(maximum as) + 1, minimum rs]
+                                 h = Hole [j | j <- [m .. maximum rs], j `notElem` uids]
+                             in (ss, h:hs)
+          | otherwise      = x
+
+        hasFinalRes :: Event -> Bool
+        hasFinalRes e = let [arg,res] = dfsChildren forest e in case res of
+          (Just (ConstEvent _ _ _ _)) -> True
+          _                           -> False
 
 -- Infering dependencies from events
 
@@ -843,7 +849,7 @@ dependencies :: EventForest -> Trace -> [Dependency]
 dependencies forest rs = loop ts0 []
 
   where ts0 :: [TreeDescr]
-        ts0 = map (\r -> let is = treeUIDs forest r in (r, is, [last $ resHoles forest r], is)) rs
+        ts0 = map (\r -> let is = treeUIDs forest r in (r, is, holes forest r, is)) rs
 
         loop :: [TreeDescr] -> [Dependency] -> [Dependency]
         loop ts as = let ts' = map (\(e,is,hs,js) -> (e,is,rmEmpty hs,js)) ts
@@ -854,8 +860,8 @@ dependencies forest rs = loop ts0 []
                                                 else loop ts'' (a:as)
 
 -- Find a list of holes between arguments and result
-resHoles :: EventForest -> Event -> [Hole]
-resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) . (holes forest)
+-- resHoles :: EventForest -> Event -> [Hole]
+-- resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) . (holes forest)
 
 
 -- Resolve the first dependency for which we find a matching hole/peg pair, and remove
@@ -870,7 +876,7 @@ oneDependency ts = (rmOverlap ts (e,is,hs,js) (e_p,is_p,hs_p,js_p), (eventUID e,
 
         -- The last hole in the TreeDescr
         h :: UID
-        h = case (last hs) of (ResHole _ xs) -> last xs
+        h = case (last hs) of (Hole xs) -> last xs
 
         -- The TreeDescr with the peg that fits the hole
         (e_p,is_p,hs_p,js_p) = dependency ts h
