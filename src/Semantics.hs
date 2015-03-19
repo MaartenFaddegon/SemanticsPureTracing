@@ -9,13 +9,13 @@ import qualified Debug.Trace as Debug
 -- Examples
 
 plus1Traced = Let ("plus1", Lambda "x" 
-                          $ Apply ( Push "plus1" 
+                          $ Apply ( Observe "plus1" 
                                   $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
                                   ) "x")
 
 -- NOTE: this only traces the top, subsequent (recursive) calls to plus are not traced
 plusTraced = Let ("p", Lambda "x" $ Lambda "y"
-                     $ Apply (Apply (Push "p" 
+                     $ Apply (Apply (Observe "p" 
                          (Lambda "a" (Lambda "b" 
                            (Apply (Apply (Var "plus") "a") "b")))
                        ) "x") "y")
@@ -23,14 +23,14 @@ plusTraced = Let ("p", Lambda "x" $ Lambda "y"
 
 -- NOTE: this only traces the top, subsequent (recursive) calls to foldl are not traced
 foldlTraced = Let ("foldlT", Lambda "f" $ Lambda "xs"  $ Lambda "z"
-                           $ Apply (Apply (Apply (Push "foldl" 
+                           $ Apply (Apply (Apply (Observe "foldl" 
                              (Var "foldl")) "f") "xs" ) "z")
 
-sumTraced = Let ("sum", Lambda "xs" (Apply (Push "sum" (Lambda "xs'" 
+sumTraced = Let ("sum", Lambda "xs" (Apply (Observe "sum" (Lambda "xs'" 
                         (Apply (Apply (Apply (Var "foldl") "p") "0" )"xs'"))) "xs"))
 
 mapTraced = Let ("mapT", Lambda "f" $ Lambda "xs"
-                       $ Apply (Apply (Push "map" (Var "map")) "f") "xs" )
+                       $ Apply (Apply (Observe "map" (Var "map")) "f") "xs" )
 
 -- data B = T | F
 -- n :: B -> B
@@ -39,7 +39,7 @@ myNot     = Let ("n", Lambda "b" $ Case (Var "b")
                     , (Constr "F" [], Constr "T" [])
                     ])
 
-notTraced = Let ("n", Lambda "b'" $ Apply (Push "n" $ Lambda "b"
+notTraced = Let ("n", Lambda "b'" $ Apply (Observe "n" $ Lambda "b"
                       $ Case (Var "b")
                              [ (Constr "T" [], Constr "F" [])
                              , (Constr "F" [], Constr "T" [])
@@ -47,7 +47,7 @@ notTraced = Let ("n", Lambda "b'" $ Apply (Push "n" $ Lambda "b"
 
 
 -- x :: B -> B -> B
-myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Push "x" $ Lambda "b1" $ Lambda "b2"
+myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Observe "x" $ Lambda "b1" $ Lambda "b2"
                       $ Case (Var "b1")
                              [ (Constr "T" [], Case (Var "b2")[ (Constr "T" [], Constr "F" [])
                                                               , (Constr "F" [], Constr "T" [])])
@@ -75,7 +75,7 @@ ex2a = {- import -} prelude
                 $ Let ("c2", Constr "Nil" [])
                 $ Let ("c1", Constr "Con" ["b", "c2"])
                 $            Constr "Con" ["a","c1"])
-     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "n")) "xs"))
+     $ Let ("h", Lambda "xs" (Apply (Observe "h" (Apply (Var "map") "n")) "xs"))
      $ Print $ Apply (Var "h") "xs"
 
 ex2b = {- import -} prelude
@@ -85,7 +85,7 @@ ex2b = {- import -} prelude
                 $ Let ("c2", Constr "Nil" [])
                 $ Let ("c1", Constr "Con" ["b", "c2"])
                 $            Constr "Con" ["a","c1"])
-     $ Let ("h", Lambda "xs" (Apply (Push "h" (Apply (Var "map") "n")) "xs"))
+     $ Let ("h", Lambda "xs" (Apply (Observe "h" (Apply (Var "map") "n")) "xs"))
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
 
@@ -131,17 +131,17 @@ ex4 = {- import -} prelude
 --      a) f -> g -> h
 --      b) f -> g, f -> h
 
-ex5a = Let ("h", Lambda "x" (Apply (Push "h" (Lambda "y" $ Var "y")) "x"))
-     $ Let ("g", Lambda "x" (Apply (Push "g" (Lambda "y" $ Apply (Var "h") "y")) "x"))
-     $ Let ("f", Lambda "x" (Apply (Push "f" (Lambda "y" $ Apply (Var "g") "y")) "x"))
+ex5a = Let ("h", Observe "h" $ Lambda "y" $ Var "y")
+     $ Let ("g", Observe "g" $ Lambda "y" $ Apply (Var "h") "y")
+     $ Let ("f", Observe "f" $ Lambda "y" $ Apply (Var "g") "y")
      $ Let ("k", Constr "1" [])
      $ Print $ Apply (Var "f") "k"
 
-ex5b = Let ("h", Lambda "x" (Apply (Push "h" (Lambda "y" $ Var "y")) "x"))
-     $ Let ("g", Lambda "x" (Apply (Push "g" (Lambda "y" $ Var "y")) "x"))
-     $ Let ("f", Lambda "x" (Apply (Push "f" (Lambda "y" $ Let ("z", Apply (Var "g") "y")
+ex5b = Let ("h", Observe "h" (Lambda "y" $ Var "y"))
+     $ Let ("g", Observe "g" (Lambda "y" $ Var "y"))
+     $ Let ("f", Observe "f" (Lambda "y" $ Let ("z", Apply (Var "g") "y")
                                                                (Apply (Var "h") "z")
-                                             )) "x"))
+                                             ))
      $ Let ("k", Constr "1" [])
      $ Print $ Apply (Var "f") "k"
 
@@ -217,7 +217,7 @@ data Expr = Lambda     Name Expr
           | Constr     String [Name]
           | Case       Expr [(Expr,Expr)]
 
-          | Push       Label Expr
+          | Observe    Label Expr
           | Observed   Parent Expr
           | FunObs     Name Name Parent Expr
           | ConsrObs   
@@ -400,7 +400,7 @@ reduce (Var x) = do
                         fresh e
      _            -> do fresh e
 
-reduce (Push l e) = do
+reduce (Observe l e) = do
   stk <- gets stack
   doPush l
   uid <- getUniq
@@ -499,7 +499,7 @@ subst n m (Lambda n' e)       = Lambda (sub n m n') (subst n m e)
 subst n m (Apply e n')        = Apply (subst n m e) (sub n m n')
 subst n m (Var n')            = Var (sub n m n')
 subst n m (Let (n',e1) e2)    = Let ((sub n m n'),(subst n m e1)) (subst n m e2)
-subst n m (Push l e)          = Push l (subst n m e)
+subst n m (Observe l e)       = Observe l (subst n m e)
 subst n m (Observed p e)      = Observed p (subst n m e)
 subst n m (FunObs n' n'' p e) = FunObs (sub n m n') (sub n m n'') p (subst n m e)
 subst n m (Plus e1 e2)        = Plus (subst n m e1) (subst n m e2)
@@ -537,9 +537,9 @@ fresh (Apply f x) = do
 fresh (Var x) =
   return (Var x)
 
-fresh (Push l e) = do
+fresh (Observe l e) = do
   e' <- fresh e
-  return (Push l e')
+  return (Observe l e')
 
 fresh (Observed p e) = do
   e' <- fresh e
@@ -904,14 +904,14 @@ type PegIndex = Int
 
 mkGraph :: (Expr,Trace,[CompStmt]) -> (Expr,CompGraph)
 mkGraph (reduct,trc,cs) = let (Graph _ vs as) = mapGraph mkVertex (mkGraph' trc cs)
-                              rs              = filter (\(Vertex [c]) -> stmtStack c == []) vs
+                              rs              = [last vs] -- TODO: used to be vs with [] as stack
                               as'             = map (\r -> Arc RootVertex r 0) rs
                           in (reduct, Graph RootVertex (RootVertex:vs) (as' ++ as))
 
 mkGraph' :: Trace -> [CompStmt] -> Graph CompStmt PegIndex
 mkGraph' trc cs
   | length cs < 1 = error "mkGraph: no computation statements?"
-  | otherwise = Graph (head cs) -- doesn't really matter, replaced above
+  | otherwise = Graph (head cs) -- Doesn't really matter, is replaced above
                       cs
                       (mkArcs trc cs)
 
