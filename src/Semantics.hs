@@ -210,6 +210,8 @@ prelude e = Let ("plus", Lambda "x" $ Lambda "y"
 --------------------------------------------------------------------------------
 -- Expressions
 
+type Label = String
+
 data Expr = Lambda     Name Expr
           | Apply      Expr Name
           | Var        Name
@@ -220,10 +222,6 @@ data Expr = Lambda     Name Expr
           | Observe    Label Expr
           | Observed   Parent Expr
           | FunObs     Name Name Parent Expr
-          | ConsrObs   
-
-          | Const      Int
-          | Plus       Expr Expr
 
           | Print      Expr
 
@@ -235,7 +233,6 @@ data Expr = Lambda     Name Expr
 
 data Context = Context { trace          :: !Trace
                        , uniq           :: !UID
-                       , stack          :: !Stack
                        , heap           :: !Heap
                        , depth          :: !Int
                        , reductionCount :: !Int
@@ -266,7 +263,7 @@ evaluate :: Expr -> (Expr,Trace)
 evaluate redex = (reduct, trace cxt)
   where (reduct,cxt) = runState (eval redex) state0
 
-state0 = Context [] 0 [] [] 0 1 [] [1..] ""
+state0 = Context{trace=[], uniq=0, heap=[], depth=0, reductionCount=1, reduceLog=[], freshVarNames=[1..], stdout=""}
 
 eval :: (Expr -> State Context Expr)
 eval expr = do 
@@ -288,10 +285,10 @@ eval expr = do
 -- Manipulating the heap
 
 type Name = String
-type Heap = [(Name,(Stack,Expr))]
+type Heap = [(Name,Expr)]
 
-insertHeap :: Name -> (Stack,Expr) -> State Context ()
-insertHeap x (_,Exception _) = return ()
+insertHeap :: Name -> Expr -> State Context ()
+insertHeap x (Exception _) = return ()
 insertHeap x e = do
   modify $ \s -> s{heap = (x,e) : (heap s)}
   doLog ("* added " ++ (show (x,e)) ++ " to heap")
@@ -303,76 +300,23 @@ updateHeap x e = do
   deleteHeap x
   insertHeap x e
 
-lookupHeap :: Name -> State Context (Stack,Expr)
+lookupHeap :: Name -> State Context Expr
 lookupHeap x = do 
   me <- fmap (lookup x . heap) get
   case me of
-    Just (stk,e) -> return (stk,e)
-    _            -> return ([],Exception ("Lookup '" ++ x ++ "' failed in heap "))
-
---------------------------------------------------------------------------------
--- Stack handling: push and call
-
-type Label = String
-type Stack = [Label]
-
-stackIsNow msg = do
-  stk <- gets stack
-  doLog ("* " ++ msg ++ ": stack is now " ++ show stk)
-
-setStack :: Stack -> State Context ()
-setStack stk = do
-  modify $ \s -> s {stack = stk}
-  stackIsNow "Restore stack from heap"
-
-doPush :: Label -> State Context ()
-doPush l = do
-  modify $ \s -> s {stack = push l (stack s)}
-  stackIsNow $ "Push " ++ l
-
-push :: Label -> Stack -> Stack
-push l s
-  | l `elem` s = dropWhile (/= l) s
-  | otherwise  = l : s
-
-doCall :: Stack -> State Context ()
-doCall sLam = do
-  stk <- gets stack
-  modify $ \s -> s {stack = call (stack s) sLam}
-  stackIsNow $ "Call " ++ show stk ++ " " ++ show sLam
-
--- call sApp sLam ∉ {sApp, SLam} when sLam is not a prefix of sApp.
-call :: Stack -> Stack -> Stack
-call sApp sLam = sLam' ++ sApp
-  where (sPre,sApp',sLam') = commonPrefix sApp sLam
-
-commonPrefix :: Stack -> Stack -> (Stack, Stack, Stack)
-commonPrefix sApp sLam
-  = let (sPre,sApp',sLam') = span2 (==) (reverse sApp) (reverse sLam)
-    in (sPre, reverse sApp', reverse sLam') 
-
-span2 :: (a -> a -> Bool) -> [a] -> [a] -> ([a], [a], [a])
-span2 f = s f []
-  where s _ pre [] ys = (pre,[],ys)
-        s _ pre xs [] = (pre,xs,[])
-        s f pre xs@(x:xs') ys@(y:ys') 
-          | f x y     = s f (x:pre) xs' ys'
-          | otherwise = (pre,xs,ys)
+    Just e -> return e
+    _      -> return $ Exception ("Lookup '" ++ x ++ "' failed in heap ")
 
 --------------------------------------------------------------------------------
 -- Reduction rules
 
 reduce :: Expr -> State Context Expr
 
-reduce (Const v) = 
-  return (Const v)
-
 reduce (Lambda x e) = 
   return (Lambda x e)
 
 reduce (Let (x,e1) e2) = do
-  stk <- gets stack
-  insertHeap x (stk,e1)
+  insertHeap x e1
   eval e2
 
 reduce (Apply f x) = do
@@ -385,41 +329,23 @@ reduce (Apply f x) = do
                         return (Exception "Apply non-Lambda?")
 
 reduce (Var x) = do
-  stk       <- gets stack
-  (xStk,e') <- lookupHeap x
-  setStack xStk                      -- Restore stack as saved on heap
-  e         <- eval e'
-  xStk'     <- gets stack
-  updateHeap x (xStk',e)             -- Update stack (and expression) on heap
-  setStack stk                       -- Restore stack as before evaluating
-  case e of
-     (Lambda _ _) -> do doCall xStk' -- For functions: the current stack is the
-                                     -- call-site stack, xStk' is the "lambda"
-                                     -- stack. Here we combine the two as Marlow,
-                                     -- Solving An Old Problem.
-                        fresh e
-     _            -> do fresh e
+  e' <- lookupHeap x
+  e  <- eval e'
+  updateHeap x e
+  fresh e
 
 reduce (Observe l e) = do
-  stk <- gets stack
-  doPush l
   uid <- getUniq
-  doTrace (RootEvent l stk uid)
+  doTrace (RootEvent l uid)
   eval (Observed (Parent uid 1) e)
 
 reduce (Observed p e) = do
-  stk <- gets stack
   e' <- eval e
   case e' of
     Exception msg ->
       return (Exception msg)
 
-    -- ObsC rule in PLDI paper
-    (Const v) -> do
-      uid <- getUniq
-      doTrace (ConstEvent uid p (show v) 0)
-      return e'
-
+    -- ObsC rule in paper
     (Constr s ns) -> do
       i <- getUniq
       doTrace (ConstEvent i p s (length ns))
@@ -427,7 +353,7 @@ reduce (Observed p e) = do
       eval $ foldl (\e (m,n,j) -> Let (m, Observed (Parent i j) (Var n)) e)
                    (Constr s ms) (zip3 ms ns [1..])
 
-    -- ObsL rule in PLDI paper
+    -- ObsL rule in paper
     (Lambda x e) -> do
       i <- getUniq
       doTrace (LamEvent i p)
@@ -468,9 +394,6 @@ reduce (Print e) = do
           doPrint s
           mapM_ printField ns
           return e'
-        (Const i) -> do
-          doPrint (show i)
-          return e'
         (Exception s) -> do
           doPrint $ "Exception: " ++ s
           return e'
@@ -480,13 +403,6 @@ reduce (Print e) = do
           eval (Print (Var n))
           doPrint ")"
 
-reduce (Plus e1 e2) = do
-  e1' <- eval e1
-  e2' <- eval e2
-  case (e1',e2') of
-        (Const v1, Const v2) -> return $ Const (v1 + v2)
-        (l,r)                -> return (Exception $ "Attempt to sum non-constant values: "
-                                                  ++ show l ++ " + " ++ show r)
 
 reduce (Exception msg) = return (Exception msg)
 
@@ -494,7 +410,6 @@ reduce (Exception msg) = return (Exception msg)
 -- Substituting variable names
 
 subst :: Name -> Name -> Expr -> Expr
-subst n m (Const v)           = Const v
 subst n m (Lambda n' e)       = Lambda (sub n m n') (subst n m e)
 subst n m (Apply e n')        = Apply (subst n m e) (sub n m n')
 subst n m (Var n')            = Var (sub n m n')
@@ -502,7 +417,6 @@ subst n m (Let (n',e1) e2)    = Let ((sub n m n'),(subst n m e1)) (subst n m e2)
 subst n m (Observe l e)       = Observe l (subst n m e)
 subst n m (Observed p e)      = Observed p (subst n m e)
 subst n m (FunObs n' n'' p e) = FunObs (sub n m n') (sub n m n'') p (subst n m e)
-subst n m (Plus e1 e2)        = Plus (subst n m e1) (subst n m e2)
 subst n m (Case e1 alts)      = Case (subst n m e1) 
                               $ map (\(e2,e3) -> (subst n m e2, subst n m e3)) alts
 subst n m (Constr s ns)       = Constr s $ map (sub n m) ns
@@ -515,9 +429,6 @@ sub n m n' = if n == n' then m else n'
 -- Fresh variable names
 
 fresh :: Expr -> State Context Expr
-
-fresh (Const v) = do
-  return (Const v)
 
 fresh (Lambda x e) = do 
   y <- getFreshVar x
@@ -552,11 +463,6 @@ fresh (FunObs x x1 p e) = do
 
 fresh (Exception msg) = return (Exception msg)
 
-fresh (Plus e1 e2) = do
-  e1' <- fresh e1
-  e2' <- fresh e2
-  return (Plus e1' e2')
-
 fresh (Constr s ns) =
   return (Constr s ns)
 
@@ -590,7 +496,6 @@ type Trace = [Event]
 data Event
   = RootEvent
     { eventLabel  :: Label
-    , eventStack  :: Stack
     , eventUID    :: UID
     } 
   | ConstEvent
@@ -612,7 +517,6 @@ data Event
 data CompStmt
  = CompStmt
     { stmtLabel  :: Label
-    , stmtStack  :: Stack
     , stmtUID    :: [UID]
     , stmtRepr   :: String
     , stmtHoles  :: [Hole]
@@ -650,14 +554,14 @@ mkEventForest trc = map children trc
                           $ filter (\e -> j == (parentUID . eventParent) e) chds)
 
         (roots,chds) = partition isRoot trc
-        isRoot (RootEvent _ _ _) = True
-        isRoot _                 = False
+        isRoot (RootEvent _ _) = True
+        isRoot _               = False
 
 
 mkStmts :: (Expr,Trace) -> (Expr,Trace,[CompStmt])
 mkStmts (reduct,trc) = (reduct,trc, map (mkStmt forest) roots)
 
-  where isRoot (RootEvent _ _ _) = True
+  where isRoot (RootEvent _ _) = True
         isRoot _                 = False
         (roots,chds) = partition isRoot trc
 
@@ -665,22 +569,22 @@ mkStmts (reduct,trc) = (reduct,trc, map (mkStmt forest) roots)
         forest = mkEventForest trc
 
 mkStmt :: EventForest -> Event -> CompStmt
-mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r h
+mkStmt forest (e@(RootEvent l _)) = CompStmt l i r h
         where r = dfsFold Infix pre post "" Trunk (Just e) forest
               pre Nothing                      _ = (++" _")
-              pre (Just (RootEvent l _ _))     _ = (++l)
+              pre (Just (RootEvent l _))       _ = (++l)
               pre (Just (ConstEvent _ _ r _))  _ = (++" ("++r)
               pre (Just (LamEvent _ _))        _ = (++" {")
               pre (Just (AppEvent _ _))        _ = (++" ->")
               post Nothing                     _ = id
-              post (Just (RootEvent l _ _))    _ = id
+              post (Just (RootEvent l _))      _ = id
               post (Just (ConstEvent _ _ r _)) _ = (++")")
               post (Just (LamEvent _ _))       _ = (++"}")
               post (Just (AppEvent _ _))       _ = id
 
               i = reverse $ dfsFold Prefix addUID nop [] Trunk (Just e) forest
               addUID Nothing                      _ is = is
-              addUID (Just (RootEvent _ _ i))     _ is = i : is
+              addUID (Just (RootEvent _ i))       _ is = i : is
               addUID (Just (ConstEvent i _ _ _))  _ is = i : is
               addUID (Just (LamEvent i _))        _ is = i : is
               addUID (Just (AppEvent i _))        _ is = i : is
@@ -692,7 +596,7 @@ mkStmt forest (e@(RootEvent l s _)) = CompStmt l s i r h
 treeUIDs :: EventForest -> Event -> [UID]
 treeUIDs forest root = reverse $ dfsFold Prefix addUID nop [] Trunk (Just root) forest
   where addUID Nothing                      _ is = is
-        addUID (Just (RootEvent _ _ i))     _ is = i : is
+        addUID (Just (RootEvent _ i))       _ is = i : is
         addUID (Just (ConstEvent i _ _ _))  _ is = i : is
         addUID (Just (LamEvent i _))        _ is = i : is
         addUID (Just (AppEvent i _))        _ is = i : is
@@ -730,7 +634,7 @@ type Visit a = Maybe Event -> Location -> a -> a
 
 dfsChildren :: EventForest -> Event -> [Maybe Event]
 dfsChildren forest e = case e of
-    (RootEvent _ _ i)    -> byPosition [1]
+    (RootEvent _ i)      -> byPosition [1]
     (ConstEvent i _ _ l) -> byPosition [1..l]
     (LamEvent i _)       -> map (Just . snd) cs
     (AppEvent i _)       -> byPosition [1,2]
@@ -813,7 +717,7 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
         pre :: Visit ([AppScope],[Hole])
         pre Nothing                     l x       = x
         pre (Just (ConstEvent i _ _ _)) l (ss,hs) = (addToScopes ss l i, hs)
-        pre (Just (RootEvent _ _ i))    l x       = x
+        pre (Just (RootEvent _ i))      l x       = x
         pre (Just (LamEvent i _))       l (ss,hs) = (addToScopes ss l i, hs)
         pre (Just e@(AppEvent i _))     l (ss,hs)
           | hasFinalRes e = (newScope l:ss,hs)
@@ -823,7 +727,7 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
         post :: Visit ([AppScope],[Hole])
         post Nothing                     _ x = x
         post (Just (ConstEvent _ _ _ _)) _ x = x
-        post (Just (RootEvent _ _ _))    _ x = x
+        post (Just (RootEvent _ _))      _ x = x
         post (Just (LamEvent _ _))       _ x = x
         post (Just e@(AppEvent i _))     l x
           | hasFinalRes e  = let ((Scope _ as rs):ss,hs)  = x
@@ -925,8 +829,8 @@ mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
         findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c
 
         (roots,chds) = partition isRoot trc
-        isRoot (RootEvent _ _ _) = True
-        isRoot _                 = False
+        isRoot (RootEvent _ _) = True
+        isRoot _               = False
 
 --------------------------------------------------------------------------------
 -- Evaluate and display.
@@ -953,8 +857,7 @@ showVertex' RootVertex  = "Root"
 showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
 
 showCompStmt :: CompStmt -> String
-showCompStmt (CompStmt l s i r h) = r
-        ++ "\n with stack " ++ show s
+showCompStmt (CompStmt l i r h) = r
         ++ "\n with UIDs "  ++ show i
         ++ "\n with holes " ++ show h
 
