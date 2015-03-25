@@ -6,6 +6,27 @@ import Data.List (sort,partition,permutations,nub,minimum,maximum,(\\),find)
 import qualified Debug.Trace as Debug
 
 --------------------------------------------------------------------------------
+-- Expressions
+
+data Expr = Lambda     Name Expr
+          | Apply      Expr Name
+          | Var        Name
+          | Let        (Name,Expr) Expr
+          | Constr     String [Name]
+          | Case       Expr [(Expr,Expr)]
+
+          | Observe    Label Expr
+          | Observed   Parent Expr
+          | FunObs     Parent Name Name Expr
+
+          | Print      Expr
+          | Exception  String
+          deriving (Show,Eq)
+
+type Label = String
+data Judgement = Right | Wrong
+
+--------------------------------------------------------------------------------
 -- Examples
 
 plus1Traced = Let ("plus1", Lambda "x" 
@@ -208,27 +229,6 @@ prelude e = Let ("plus", Lambda "x" $ Lambda "y"
 
 
 --------------------------------------------------------------------------------
--- Expressions
-
-type Label = String
-
-data Expr = Lambda     Name Expr
-          | Apply      Expr Name
-          | Var        Name
-          | Let        (Name,Expr) Expr
-          | Constr     String [Name]
-          | Case       Expr [(Expr,Expr)]
-
-          | Observe    Label Expr
-          | Observed   Parent Expr
-          | FunObs     Name Name Parent Expr
-
-          | Print      Expr
-
-          | Exception  String
-          deriving (Show,Eq)
-
---------------------------------------------------------------------------------
 -- The state
 
 data Context = Context { trace          :: !Trace
@@ -358,13 +358,13 @@ reduce (Observed p e) = do
       i <- getUniq
       doTrace (LamEvent i p)
       x1 <- getFreshVar x
-      return (Lambda x1 (FunObs x x1 (Parent i 1) e))
+      return (Lambda x1 (FunObs (Parent i 1) x x1 e))
 
     e -> 
       return (Exception $ "Observe undefined: " ++ show e)
 
 -- ObsF rule in paper
-reduce (FunObs x x1 p e) = do
+reduce (FunObs p x x1 e) = do
       i  <- getUniq
       doTrace (AppEvent i p)
       x2 <- getFreshVar x
@@ -416,7 +416,7 @@ subst n m (Var n')            = Var (sub n m n')
 subst n m (Let (n',e1) e2)    = Let ((sub n m n'),(subst n m e1)) (subst n m e2)
 subst n m (Observe l e)       = Observe l (subst n m e)
 subst n m (Observed p e)      = Observed p (subst n m e)
-subst n m (FunObs n' n'' p e) = FunObs (sub n m n') (sub n m n'') p (subst n m e)
+subst n m (FunObs p n' n'' e) = FunObs p (sub n m n') (sub n m n'') (subst n m e)
 subst n m (Case e1 alts)      = Case (subst n m e1) 
                               $ map (\(e2,e3) -> (subst n m e2, subst n m e3)) alts
 subst n m (Constr s ns)       = Constr s $ map (sub n m) ns
@@ -456,10 +456,10 @@ fresh (Observed p e) = do
   e' <- fresh e
   return (Observed p e')
 
-fresh (FunObs x x1 p e) = do
+fresh (FunObs p x x1 e) = do
   y <- getFreshVar x
   e' <- (fresh . subst x y) e
-  return (FunObs y x1 p e')
+  return (FunObs p y x1 e')
 
 fresh (Exception msg) = return (Exception msg)
 
