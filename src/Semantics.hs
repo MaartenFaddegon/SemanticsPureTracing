@@ -3,9 +3,8 @@ module Semantics where
 import Prelude hiding (Right)
 import Control.Monad.State
 import Data.Graph.Libgraph
-import qualified Data.Graph.Libgraph as Libgraph
-import Data.List (sort,partition,permutations,nub,minimum,maximum,(\\),find)
-import qualified Debug.Trace as Debug
+import Data.List (nub,(\\),find)
+import Test.QuickCheck
 
 --------------------------------------------------------------------------------
 -- Expressions
@@ -37,43 +36,43 @@ instance Show ConstrId where show WrongConstr  = ":("
 --------------------------------------------------------------------------------
 -- Examples
 
+-- We will use the following constructor encoding in the examples:
+c_0 :: [Name] -> Expr
 c_0 = Constr (ConstrId 0) -- False
+
+c_1 :: [Name] -> Expr
 c_1 = Constr (ConstrId 1) -- True
+
+c_2 :: [Name] -> Expr
 c_2 = Constr (ConstrId 2) -- the empty list []
+
+c_3 :: [Name] -> Expr
 c_3 = Constr (ConstrId 3) -- the list constructor (:)
 
 
-plus1Traced = Let ("plus1", Lambda "x" 
-                          $ Apply ( Observe "plus1" Right
-                                  $ Lambda "x'" (Apply (Apply (Var "plus") "1") "x'")
-                                  ) "x")
-
--- NOTE: this only traces the top, subsequent (recursive) calls to plus are not traced
-plusTraced = Let ("p", Lambda "x" $ Lambda "y"
-                     $ Apply (Apply (Observe "p" Right
-                         (Lambda "a" (Lambda "b" 
-                           (Apply (Apply (Var "plus") "a") "b")))
-                       ) "x") "y")
-
-
 -- NOTE: this only traces the top, subsequent (recursive) calls to foldl are not traced
+foldlTraced :: Expr -> Expr
 foldlTraced = Let ("foldlT", Lambda "f" $ Lambda "xs"  $ Lambda "z"
                            $ Apply (Apply (Apply (Observe "foldl" Right
                              (Var "foldl")) "f") "xs" ) "z")
 
+sumTraced :: Expr -> Expr
 sumTraced = Let ("sum", Lambda "xs" (Apply (Observe "sum" Right (Lambda "xs'" 
                         (Apply (Apply (Apply (Var "foldl") "p") "0" )"xs'"))) "xs"))
 
+mapTraced :: Expr -> Expr
 mapTraced = Let ("mapT", Lambda "f" $ Lambda "xs"
                        $ Apply (Apply (Observe "map" Right (Var "map")) "f") "xs" )
 
 -- data B = T | F
 -- n :: B -> B
+myNot :: Expr -> Expr
 myNot     = Let ("n", Lambda "b" $ Case (Var "b")
                     [ (c_1 [], c_0 [])
                     , (c_0 [], c_1 [])
                     ])
 
+notTraced :: Expr -> Expr
 notTraced = Let ("n", Lambda "b'" $ Apply (Observe "n" Right $ Lambda "b"
                       $ Case (Var "b")
                              [ (c_1 [], c_0 [])
@@ -82,6 +81,7 @@ notTraced = Let ("n", Lambda "b'" $ Apply (Observe "n" Right $ Lambda "b"
 
 
 -- x :: B -> B -> B
+myXor :: Expr -> Expr
 myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Observe "x" Right $ Lambda "b1" $ Lambda "b2"
                       $ Case (Var "b1")
                              [ (c_1 [], Case (Var "b2")[ (c_1 [], c_0 [])
@@ -92,6 +92,7 @@ myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Observe "x" Right $ 
                              ) "a1") "a2")
 
 
+ex1 :: Expr
 ex1 = {- import -} prelude
     $ {- import -} notTraced
     $ Let ("b", (c_0 []))
@@ -102,7 +103,7 @@ ex1 = {- import -} prelude
 --
 --   a) without reverse
 --   b) reverse before printing (but outside traced code)
-
+ex2a :: Expr
 ex2a = {- import -} prelude
      $ {- import -} notTraced
      $ Let ("xs", Let ("a", c_1 [])
@@ -113,6 +114,7 @@ ex2a = {- import -} prelude
      $ Let ("h", Lambda "xs" (Apply (Observe "h" Right (Apply (Var "map") "n")) "xs"))
      $ Print $ Apply (Var "h") "xs"
 
+ex2b :: Expr
 ex2b = {- import -} prelude
      $ {- import -} notTraced
      $ Let ("xs", Let ("a", c_1 [])
@@ -126,7 +128,7 @@ ex2b = {- import -} prelude
 
 -- Example 3: Trace map and its callees, reverse result before printing
 -- but outside traced code
-
+ex3a :: Expr
 ex3a = {- import -} prelude
      $ {- import -} myNot
      $ {- import -} mapTraced
@@ -138,6 +140,7 @@ ex3a = {- import -} prelude
      $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
              $ Var "ys"
 
+ex3b :: Expr
 ex3b = {- import -} prelude
      $ {- import -} notTraced
      $ {- import -} mapTraced
@@ -150,7 +153,7 @@ ex3b = {- import -} prelude
              $ Apply (Var "reverse") "ys"
 
 -- Example 4: Trace foldl and its callees in a simple checksum program
-
+ex4 :: Expr
 ex4 = {- import -} prelude
     $ {- import -} foldlTraced
     $ {- import -} myXor
@@ -165,13 +168,14 @@ ex4 = {- import -} prelude
 -- Example 5: 
 --      a) f -> g -> h
 --      b) f -> g, f -> h
-
+ex5a :: Expr
 ex5a = Let ("h", Observe "h" Wrong $ Lambda "y" $ Var "y")
      $ Let ("g", Observe "g" Right $ Lambda "y" $ Apply (Var "h") "y")
      $ Let ("f", Observe "f" Right $ Lambda "y" $ Apply (Var "g") "y")
      $ Let ("k", c_1 [])
      $ Print $ Apply (Var "f") "k"
 
+ex5b :: Expr
 ex5b = Let ("h", Observe "h" Wrong (Lambda "y" $ Var "y"))
      $ Let ("g", Observe "g" Right (Lambda "y" $ Var "y"))
      $ Let ("f", Observe "f" Right (Lambda "y" $ Let ("z", Apply (Var "g") "y")
@@ -243,6 +247,7 @@ doLog msg = do
   where showd 0 = " "
         showd n = '|' : showd (n-1)
 
+doPrint :: String -> State Context ()
 doPrint s = do
     modify $ \cxt -> cxt{stdout = stdout cxt ++ s}
 
@@ -258,6 +263,7 @@ evaluate :: Expr -> (Expr,Trace)
 evaluate redex = (reduct, trace cxt)
   where (reduct,cxt) = runState (eval redex) state0
 
+state0 :: Context
 state0 = Context{trace=[], uniq=0, heap=[], depth=0, reductionCount=1, reduceLog=[], freshVarNames=[1..], stdout=""}
 
 eval :: (Expr -> State Context Expr)
@@ -283,7 +289,7 @@ type Name = String
 type Heap = [(Name,Expr)]
 
 insertHeap :: Name -> Expr -> State Context ()
-insertHeap x (Exception _) = return ()
+insertHeap _ (Exception _) = return ()
 insertHeap x e = do
   modify $ \s -> s{heap = (x,e) : (heap s)}
   doLog ("* added " ++ (show (x,e)) ++ " to heap")
@@ -291,6 +297,7 @@ insertHeap x e = do
 deleteHeap :: Name -> State Context ()
 deleteHeap x = modify $ \s -> s{heap = filter ((/= x) . fst) (heap s)}
 
+updateHeap :: Name -> Expr -> State Context ()
 updateHeap x e = do
   deleteHeap x
   insertHeap x e
@@ -317,7 +324,7 @@ reduce (Let (x,e1) e2) = do
 reduce (Apply f x) = do
   e <- eval f
   case e of 
-    (Lambda y e)  -> eval (subst y x e)
+    (Lambda y e')  -> eval (subst y x e')
     Exception msg -> return (Exception msg)
     _             -> do doLog "Attempt to apply non-Lambda!"
                         doLog (show e)
@@ -335,29 +342,30 @@ reduce (Observe l jmt e) = do
   eval (Observed (Parent uid 1) jmt e)
 
 reduce (Observed p jmt e) = do
-  e' <- eval e
-  case e' of
+  w <- eval e
+  case w of
     Exception msg ->
       return (Exception msg)
 
     -- ObsC rule in paper
     (Constr s ns) -> do
       let t = case jmt of Right -> s; Wrong -> WrongConstr
+                          Unassessed -> error "Unassessed judgement in ObsC rule"
       i <- getUniq
       doTrace (ConstEvent i p t (length ns))
       ms <- mapM getFreshVar ns
-      eval $ foldl (\e (m,n,j) -> Let (m, Observed (Parent i j) jmt (Var n)) e)
+      eval $ foldl (\e' (m,n,j) -> Let (m, Observed (Parent i j) jmt (Var n)) e')
                    (Constr t ms) (zip3 ms ns [1..])
 
     -- ObsL rule in paper
-    (Lambda x e) -> do
+    (Lambda x e') -> do
       i <- getUniq
       doTrace (LamEvent i p)
       x1 <- getFreshVar x
-      return (Lambda x1 (FunObs (Parent i 1) jmt x x1 e))
+      return (Lambda x1 (FunObs (Parent i 1) jmt x x1 e'))
 
-    e -> 
-      return (Exception $ "Observe undefined: " ++ show e)
+    e' -> 
+      return (Exception $ "Observe undefined: " ++ show e')
 
 -- ObsF rule in paper
 -- Note how the Judgement is only passed on to the result, not the argument.
@@ -372,15 +380,15 @@ reduce (FunObs p jmt x x1 e) = do
 reduce (Case e1 alts) = do
   e1' <- eval e1
   case e1' of
-    (Constr i ys) -> case lookup i alts of
+    (Constr i ys) -> case myLookup i alts of
                        (Just alt) -> red ys alt
                        Nothing    -> return $ non_exh i
     _ -> return $ Exception "Case on a non-Constr expression"
     
     where non_exh n                = Exception $ "Non-exhaustive patterns in Case: " ++ show n
-          lookup n                 = (Prelude.lookup n) 
-                                   . (map $ \(Constr t ys,e)->(t,(Constr t ys,e)))
-          red ys (Constr s xs, e2) = eval $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
+          myLookup n               = (lookup n) . (map $ \(Constr t ys,e)->(t,(Constr t ys,e)))
+          red ys (Constr _ xs, e2) = eval $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
+          red _  _                 = error "Substitute in reduce Case alternative went wrong"
 
 reduce (Constr i xs) = return $ Constr i xs
 
@@ -418,6 +426,7 @@ subst n m (Case e1 alts)        = Case (subst n m e1)
                                 $ map (\(e2,e3) -> (subst n m e2, subst n m e3)) alts
 subst n m (Constr s ns)         = Constr s $ map (sub n m) ns
 subst n m (Print e)             = Print (subst n m e)
+subst _ _ e@Exception{}         = e
 
 sub :: Name -> Name -> Name -> Name
 sub n m n' = if n == n' then m else n'
@@ -467,16 +476,11 @@ fresh (Case e1 alts) = do
   let (e2s,e3s) = unzip alts
   e1'  <- fresh e1
   e3s' <- mapM fresh e3s
-  return $ Case e1 (zip e2s e3s')
-
-  where freshAlt (Constr s xs, e) = do
-          ys <- mapM getFreshVar xs
-          e' <- fresh $ foldl (\v (x,y) -> subst x y v) e (zip xs ys)
-          return (Constr s ys, e')
+  return $ Case e1' (zip e2s e3s')
 
 fresh (Print e) = do
   e' <- fresh e
-  return (Print e)
+  return (Print e')
 
 getFreshVar :: Name -> State Context Name
 getFreshVar n = do
@@ -544,35 +548,31 @@ doTrace rec = do
 -- to a child event.
 type EventForest = [(UID, [(Int, Event)])]
 
+isRoot :: Event -> Bool
+isRoot (RootEvent _ _) = True
+isRoot _               = False
+
 mkEventForest :: Trace -> EventForest
 mkEventForest trc = map children trc
   where children e = let j = eventUID e
                      in (j, map    (\c -> (parentPosition . eventParent $ c, c))
-                          $ filter (\e -> j == (parentUID . eventParent) e) chds)
-
-        (roots,chds) = partition isRoot trc
-        isRoot (RootEvent _ _) = True
-        isRoot _               = False
-
+                          $ filter (\e' -> j == (parentUID . eventParent) e') chds)
+        chds = filter (not . isRoot) trc
 
 mkStmts :: (Expr,Trace) -> (Expr,Trace,[CompStmt])
 mkStmts (reduct,trc) = (reduct,trc, map (mkStmt forest) roots)
 
-  where isRoot (RootEvent _ _) = True
-        isRoot _                 = False
-        (roots,chds) = partition isRoot trc
-
-        forest :: EventForest
+  where roots = filter isRoot trc
         forest = mkEventForest trc
 
 mkStmt :: EventForest -> Event -> CompStmt
-mkStmt forest (e@(RootEvent l _)) = CompStmt l i r h j
+mkStmt forest (e@(RootEvent lbl _)) = CompStmt lbl i repr h j
 
         where i :: [UID]
               i = treeUIDs forest e
 
-              r :: String
-              r = dfsFold Infix pre post "" Trunk (Just e) forest
+              repr :: String
+              repr = dfsFold Infix pre post "" Trunk (Just e) forest
               pre Nothing                         _ = (++" _")
               pre (Just RootEvent{eventLabel=l})  _ = (++l)
               pre (Just ConstEvent{eventRepr=r})  _ = (++" ("++show r)
@@ -589,17 +589,17 @@ mkStmt forest (e@(RootEvent l _)) = CompStmt l i r h j
 
               j :: Judgement
               j = judgeTree forest e
+mkStmt _ e = error $ "mkStmt should be given RootEvent, was given " ++ show e
 
 judgeTree :: EventForest -> Event -> Judgement
 judgeTree forest e@AppEvent{} 
   = let [arg,res] = dfsChildren forest e
     in case (judgeEventList forest [arg],judgeEventList forest [res]) of
-         (Right,jmt) -> jmt
-         (Wrong,_  ) -> Right
-judgeTree forest ConstEvent{eventRepr=WrongConstr}
-  = Wrong
-judgeTree forest e
-  = judgeEventList forest (dfsChildren forest e)
+         (Right,jmt)     -> jmt
+         (Wrong,_  )     -> Right
+         (Unassessed, _) -> error "judgeTree expected Right or Wrong, got Unassessed"
+judgeTree _ ConstEvent{eventRepr=WrongConstr} = Wrong
+judgeTree forest e = judgeEventList forest (dfsChildren forest e)
 
 judgeEventList :: EventForest -> [Maybe Event] -> Judgement
 judgeEventList forest = bool2jmt . (all isRight) . (map judgeME)
@@ -612,7 +612,7 @@ judgeEventList forest = bool2jmt . (all isRight) . (map judgeME)
 
 
 treeUIDs :: EventForest -> Event -> [UID]
-treeUIDs forest root = reverse $ dfsFold Prefix addUID nop [] Trunk (Just root) forest
+treeUIDs forest r = reverse $ dfsFold Prefix addUID nop [] Trunk (Just r) forest
   where addUID (Just e) _ is = eventUID e : is
         addUID Nothing  _ is = is
         nop    _        _ is = is
@@ -649,10 +649,10 @@ type Visit a = Maybe Event -> Location -> a -> a
 
 dfsChildren :: EventForest -> Event -> [Maybe Event]
 dfsChildren forest e = case e of
-    RootEvent{eventUID=i}                -> byPosition [1]
-    ConstEvent{eventUID=i,eventLength=l} -> byPosition [1..l]
-    LamEvent{eventUID=i}                 -> map (Just . snd) cs
-    AppEvent{eventUID=i}                 -> byPosition [1,2]
+    RootEvent{}               -> byPosition [1]
+    ConstEvent{eventLength=l} -> byPosition [1..l]
+    LamEvent{}                -> map (Just . snd) cs
+    AppEvent{}                -> byPosition [1,2]
 
   where -- Find list of events by position
         byPosition :: [ParentPosition] -> [Maybe Event]
@@ -682,7 +682,7 @@ dfsFold ip pre post z w me forest
   where z'  = pre me w z
 
         cs :: [Maybe Event]
-        cs = case me of (Just e) -> dfsChildren forest e
+        cs = case me of (Just e) -> dfsChildren forest e; Nothing -> error "dfsFold filter failed"
 
         csFold = foldl (\z'' (c,w') -> dfsFold ip pre post z'' w' c forest) z'
 
@@ -721,18 +721,18 @@ addToScopes ss l i  = map add ss
                   Res -> s{resIds=i:resIds s}
 
 holes :: EventForest -> Event -> [Hole]
-holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
+holes forest rootEvent = snd $ dfsFold Prefix pre post z Trunk (Just rootEvent) forest
 
   where z :: ([AppScope], [Hole])
         z = ([],[])
 
-        uids = treeUIDs forest root
+        uids = treeUIDs forest rootEvent
 
         -- On dfs previsit collect ids per subtree
         pre :: Visit ([AppScope],[Hole])
-        pre Nothing                        l x       = x
+        pre Nothing                        _ x       = x
         pre (Just ConstEvent{eventUID=i})  l (ss,hs) = (addToScopes ss l i, hs)
-        pre (Just RootEvent{eventUID=i})   l x       = x
+        pre (Just RootEvent{})             _ x       = x
         pre (Just LamEvent{eventUID=i})    l (ss,hs) = (addToScopes ss l i, hs)
         pre (Just e@AppEvent{eventUID=i})  l (ss,hs)
           | hasFinalRes e = (newScope l:ss,hs)
@@ -744,7 +744,7 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
         post (Just ConstEvent{})            _ x = x
         post (Just RootEvent{})             _ x = x
         post (Just LamEvent{})              _ x = x
-        post (Just e@AppEvent{eventUID=i})  l x
+        post (Just e@AppEvent{})            _ x
           | hasFinalRes e  = let ((Scope _ as rs):ss,hs)  = x
                                  m = minimum [(maximum as) + 1, minimum rs]
                                  h = Hole [j | j <- [m .. maximum rs], j `notElem` uids]
@@ -752,7 +752,7 @@ holes forest root = snd $ dfsFold Prefix pre post z Trunk (Just root) forest
           | otherwise      = x
 
         hasFinalRes :: Event -> Bool
-        hasFinalRes e = let [arg,res] = dfsChildren forest e in case res of
+        hasFinalRes e = let [_,res] = dfsChildren forest e in case res of
           (Just ConstEvent{}) -> True
           _                   -> False
 
@@ -789,7 +789,7 @@ oneDependency :: [TreeDescr] -> ([TreeDescr], Dependency)
 oneDependency ts = (rmOverlap ts (e,is,hs,js) (e_p,is_p,hs_p,js_p), (eventUID e, eventUID e_p, h))
        
   where -- The first TreeDescr with a hole left
-        (e,is,hs,js) = case find (\(_,_,hs,_) -> hs /= []) ts of
+        (e,is,hs,js) = case find (\(_,_,hs',_) -> hs' /= []) ts of
                          (Just t) -> t
                          Nothing  -> error "oneDependency: No more holes left?"
 
@@ -804,7 +804,7 @@ rmOverlap :: [TreeDescr] -> TreeDescr -> TreeDescr -> [TreeDescr]
 rmOverlap ts t_h t_p = map (\t -> if t == t_h then rmOverlap1 t_h t_p else t) ts
 
 rmOverlap1 :: TreeDescr -> TreeDescr -> TreeDescr
-rmOverlap1 (e,is,hs,js) (e',is',hs',js') = (e,is,new_hs,new_js)
+rmOverlap1 (e,is,hs,js) (_,is',hs',js') = (e,is,new_hs,new_js)
   where new_hs = map (flip delIds $ is' ++ js') hs \\\\ hs'
         new_js = nub (js ++ js')
 
@@ -815,7 +815,7 @@ dependency ts h = case filter (\(_,pegs,_,_) -> h `elem` pegs) ts of
                      (t:_) -> t
 
 --------------------------------------------------------------------------------
--- Debug
+-- Constructing a computation graph
 
 data Vertex = RootVertex | Vertex CompStmt deriving (Eq,Show,Ord)
 type CompGraph = Graph Vertex PegIndex
@@ -841,11 +841,8 @@ mkArcs :: Trace -> [CompStmt] -> [Arc CompStmt PegIndex]
 mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
   where forest  = mkEventForest trc
         ds      = dependencies forest roots
-        findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c
-
-        (roots,chds) = partition isRoot trc
-        isRoot (RootEvent _ _) = True
-        isRoot _               = False
+        findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c; Nothing -> error "mkArcs: non-existant peg?"
+        roots   = filter isRoot trc
 
 --------------------------------------------------------------------------------
 -- Evaluate and display.
@@ -869,7 +866,7 @@ showVertex' RootVertex  = "Root"
 showVertex' (Vertex c) = showCompStmt c
 
 showCompStmt :: CompStmt -> String
-showCompStmt (CompStmt l i r h j) = r
+showCompStmt (CompStmt _ i r h j) = r
         ++ "\n with UIDs "     ++ show i
         ++ "\n with holes "    ++ show h
         ++ "\n with judgment " ++ show j
@@ -877,6 +874,7 @@ showCompStmt (CompStmt l i r h j) = r
 showArc :: Arc Vertex PegIndex -> String
 showArc (Arc _ _ i)  = show i
 
+disp' :: (CompGraph -> IO a) -> Expr -> IO a
 disp' f expr = do
   putStrLn (messages ++ strc)
   -- Uncomment the next line to write all reduction steps to file (for off-line analysis).
@@ -890,3 +888,83 @@ findFaulty :: Expr -> [Vertex]
 findFaulty = findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
   where j RootVertex = Right
         j (Vertex c) = stmtJudgement c
+
+--------------------------------------------------------------------------------
+-- Generating random expressions
+
+gen_varName :: Gen String
+gen_varName = elements $ map (:[]) ['a'..'i']
+
+gen_var :: Gen Expr
+gen_var = liftM Var gen_varName
+
+gen_constr :: Gen Expr
+gen_constr = oneof [ elements [c_0 [], c_1 [], c_2 []]
+                     , liftM2 (\v1 v2 -> c_3 [v1,v2]) gen_varName gen_varName
+                     ]
+
+gen_case :: Int -> Gen Expr
+gen_case n = return mkCase `ap` gen_expr' `ap` gen_expr' `ap` gen_expr' `ap` gen_expr' `ap` gen_expr' 
+                           `ap` gen_varName `ap` gen_varName
+  where mkCase e e0 e1 e2 e3 n1 n2 = Case e [(c_0 [],e0),(c_1 [],e1),(c_2 [],e2),(c_3 [n1,n2],e3)]
+        gen_expr' = gen_expr $ (n `div` 7) - 1
+
+gen_expr :: Int -> Gen Expr
+gen_expr 0 = gen_constr
+gen_expr n = oneof [ gen_constr
+                   , gen_var
+                   , gen_case n
+                   , liftM2 Lambda gen_varName (gen_expr $ n-1)
+                   , liftM2 Apply  (gen_expr $ n-1) gen_varName
+                   , liftM3 mkLet  gen_varName (gen_expr $ n-1 `div` 2) (gen_expr $ n-1 `div` 2)
+                   , liftM3 Observe gen_label gen_jmt (gen_expr $ n-1)
+                   ]
+  where gen_label         = elements $ map (:[]) ['A'..'Z']
+        gen_jmt           = elements [Right, Wrong]
+        mkLet a e1 e2     = Let (a,e1) e2
+
+uniqueLabels :: Expr -> Expr
+uniqueLabels e = snd (uniqueLabels' lbls e)
+  where lbls = zipWith (++) (cycle ["CC"]) (map show' [1..])
+        show' = show :: Integer -> String
+
+uniqueLabels' :: [Label] -> Expr -> ([Label], Expr)
+uniqueLabels' []   _                     = error "uniqueLabels' exhausted available labels"
+uniqueLabels' lbls (Constr n fs)         = (lbls,Constr n fs)
+uniqueLabels' lbls (Lambda n e)          = let (lbls',e') = uniqueLabels' lbls e
+                                           in (lbls',Lambda n e')
+uniqueLabels' lbls (Apply e n)           = let (lbls',e') = uniqueLabels' lbls e
+                                           in (lbls',Apply e' n)
+uniqueLabels' lbls (Var n)               = (lbls,Var n)
+uniqueLabels' lbls (Let (n,e1) e2)       = let (lbls1,e1') = uniqueLabels' lbls  e1
+                                               (lbls2,e2') = uniqueLabels' lbls1 e2
+                                           in (lbls2,Let (n,e1') e2')
+uniqueLabels' (l:lbls) (Observe _ j e)   = let (lbls',e') = uniqueLabels' lbls e
+                                           in (lbls',Observe l j e')
+uniqueLabels' lbls     (Case e alts)     = let (lbls',alts') = foldl (\(ls,as) alt -> let (ls',a) = uniqueLabels'_tuple ls alt 
+                                                                                      in (ls',a:as)) (lbls,[]) alts
+                                               (lbls'',e')   = uniqueLabels' lbls' e
+                                           in (lbls'',Case e' alts') 
+uniqueLabels' _ expr                      = error $ "Unexpected expr '" ++ show expr ++ "' in uniqueLabels'."
+
+uniqueLabels'_tuple :: [Label] -> (Expr,Expr) -> ([Label], (Expr,Expr))
+uniqueLabels'_tuple ls (e1,e2) = let (ls', e1') = uniqueLabels' ls  e1
+                                     (ls'',e2') = uniqueLabels' ls' e2
+                                 in (ls'', (e1',e2'))
+
+instance Arbitrary Expr where
+
+  arbitrary = sized gen_expr
+
+  shrink (Constr _ _)      = []
+  shrink (Observe l j e)   = e : (map (Observe l j) (shrink e))
+  shrink (Lambda n e)      = e : (map (Lambda n) (shrink e))
+  shrink (Apply e n)       = let alts = e : (map (flip Apply n) (shrink e))
+                             in case e of
+                               (Lambda _ e') -> e' : alts
+                               _             -> alts
+  shrink (Let (n,e1) e2)   = e2 : e1
+                             :    (map (Let (n,e1)) (shrink e2))
+                             ++   (map (\e-> Let (n,e) e2) (shrink e1))
+  shrink _                 = [c_0 []]
+
