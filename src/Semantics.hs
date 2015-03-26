@@ -884,10 +884,17 @@ disp' f expr = do
         strc = "\n\nReduct: " ++ show reduct
                ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
 
-findFaulty :: Expr -> [Vertex]
-findFaulty = findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
+
+--------------------------------------------------------------------------------
+-- Finding faulty program slices
+
+-- Evaluate, and use algorithmic debugging on result
+algoDebug :: Expr -> [Vertex]
+algoDebug = findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
   where j RootVertex = Right
         j (Vertex c) = stmtJudgement c
+
+-- Extract program slices we marked as faulty
 
 --------------------------------------------------------------------------------
 -- Generating random expressions
