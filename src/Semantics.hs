@@ -31,15 +31,15 @@ data ConstrId = WrongConstr
               deriving (Eq,Ord)
 
 instance Show ConstrId where show WrongConstr  = ":("
-                             show (ConstrId i) = show i
+                             show (ConstrId i) = "c_" ++ show i
 
 --------------------------------------------------------------------------------
 -- Examples
 
 c_0 = Constr (ConstrId 0) -- False
 c_1 = Constr (ConstrId 1) -- True
-c_3 = Constr (ConstrId 1) -- the empty list []
-c_4 = Constr (ConstrId 1) -- the list constructor (:)
+c_2 = Constr (ConstrId 2) -- the empty list []
+c_3 = Constr (ConstrId 3) -- the list constructor (:)
 
 
 plus1Traced = Let ("plus1", Lambda "x" 
@@ -106,9 +106,9 @@ ex2a = {- import -} prelude
      $ {- import -} notTraced
      $ Let ("xs", Let ("a", c_1 [])
                 $ Let ("b", c_0 [])
-                $ Let ("c2", c_3 [])
-                $ Let ("c1", c_4 ["b", "c2"])
-                $            c_4 ["a","c1"])
+                $ Let ("c2", c_2 [])
+                $ Let ("c1", c_3 ["b", "c2"])
+                $            c_3 ["a","c1"])
      $ Let ("h", Lambda "xs" (Apply (Observe "h" Right (Apply (Var "map") "n")) "xs"))
      $ Print $ Apply (Var "h") "xs"
 
@@ -116,9 +116,9 @@ ex2b = {- import -} prelude
      $ {- import -} notTraced
      $ Let ("xs", Let ("a", c_1 [])
                 $ Let ("b", c_0 [])
-                $ Let ("c2", c_3 [])
-                $ Let ("c1", c_4 ["b", "c2"])
-                $            c_4 ["a","c1"])
+                $ Let ("c2", c_2 [])
+                $ Let ("c1", c_3 ["b", "c2"])
+                $            c_3 ["a","c1"])
      $ Let ("h", Lambda "xs" (Apply (Observe "h" Right (Apply (Var "map") "n")) "xs"))
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
@@ -131,9 +131,9 @@ ex3a = {- import -} prelude
      $ {- import -} mapTraced
      $ Let ("xs", Let ("a", c_1 [])
                 $ Let ("b", c_0 [])
-                $ Let ("c2", c_3 [])
-                $ Let ("c1", c_4 ["b", "c2"])
-                $            c_4 ["a","c1"])
+                $ Let ("c2", c_2 [])
+                $ Let ("c1", c_3 ["b", "c2"])
+                $            c_3 ["a","c1"])
      $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
              $ Var "ys"
 
@@ -142,9 +142,9 @@ ex3b = {- import -} prelude
      $ {- import -} mapTraced
      $ Let ("xs", Let ("a", c_1 [])
                 $ Let ("b", c_0 [])
-                $ Let ("c2", c_3 [])
-                $ Let ("c1", c_4 ["b", "c2"])
-                $            c_4 ["a","c1"])
+                $ Let ("c2", c_2 [])
+                $ Let ("c1", c_3 ["b", "c2"])
+                $            c_3 ["a","c1"])
      $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
              $ Apply (Var "reverse") "ys"
 
@@ -155,9 +155,9 @@ ex4 = {- import -} prelude
     $ {- import -} myXor
      $ Let ("bs", Let ("a", c_1 [])
                 $ Let ("b", c_0 [])
-                $ Let ("c2", c_3 [])
-                $ Let ("c1", c_4 ["b", "c2"])
-                $            c_4 ["a","c1"])
+                $ Let ("c2", c_2 [])
+                $ Let ("c1", c_3 ["b", "c2"])
+                $            c_3 ["a","c1"])
      $ Let ("z", c_0 [])
      $ Print $ Apply (Apply (Apply (Var "foldlT") "x") "z") "bs"
 
@@ -183,40 +183,40 @@ ex5b = Let ("h", Observe "h" Wrong (Lambda "y" $ Var "y"))
 --------------------------------------------------------------------------------
 -- Prelude, with:
 --
--- map = \f xs -> case xs of (c_3 [])    -> xs
---                           (c_4 [h,t]) -> let h' = f h, t' = map f t
---                                                   in c_4 [h', t']
+-- map = \f xs -> case xs of (c_2 [])    -> xs
+--                           (c_3 [h,t]) -> let h' = f h, t' = map f t
+--                                                   in c_3 [h', t']
 --
--- foldl = \f z xs -> case xs of (c_3 [])    -> z
---                               (c_4 [h,t]) -> let z' = f z h
+-- foldl = \f z xs -> case xs of (c_2 [])    -> z
+--                               (c_3 [h,t]) -> let z' = f z h
 --                                                       in foldl f z' t
--- reverse = \xs -> let f = \z x -> c_4 [x,z]
---                      z = c_3 []
+-- reverse = \xs -> let f = \z x -> c_3 [x,z]
+--                      z = c_2 []
 --                  in foldl f z xs
 
 
 prelude :: Expr -> Expr
 prelude e = Let ("map", Lambda "f" $ Lambda "xs" 
                       $ Case (Var "xs")
-                             [ (c_3 [], Var "xs")
-                             , ( c_4 ["h","t"]
+                             [ (c_2 [], Var "xs")
+                             , ( c_3 ["h","t"]
                                , Let ("h'", Apply (Var "f") "h")
                                $ Let ("t'", Apply (Apply (Var "map") "f") "t")
-                               $ c_4 ["h'","t'"]
+                               $ c_3 ["h'","t'"]
                                )
                              ])
           $ Let ("foldl", Lambda "f" $ Lambda "z"  $ Lambda "xs"
                         $ Case (Var "xs")
-                             [ (c_3 [], Var "z")
-                             , ( c_4 ["h","t"]
+                             [ (c_2 [], Var "z")
+                             , ( c_3 ["h","t"]
                                , Let ("z'", Apply (Apply (Var "f") "z") "h")
                                $ Apply (Apply (Apply (Var "foldl") "f") "z'") "t"
                                )
                              ])
           $ Let ("reverse", Lambda "xs"
                           $ Let ("f", Lambda "z" $ Lambda "x"
-                                    $ c_4 ["x","z"])
-                          $ Let ("z", c_3 [])
+                                    $ c_3 ["x","z"])
+                          $ Let ("z", c_2 [])
                           $ Apply (Apply (Apply (Var "foldl") "f") "z") "xs")
           $ e
 
