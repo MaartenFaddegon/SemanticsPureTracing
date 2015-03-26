@@ -3,6 +3,7 @@ module Semantics where
 import Prelude hiding (Right)
 import Control.Monad.State
 import Data.Graph.Libgraph
+import qualified Data.Graph.Libgraph as Libgraph
 import Data.List (sort,partition,permutations,nub,minimum,maximum,(\\),find)
 import qualified Debug.Trace as Debug
 
@@ -816,7 +817,7 @@ dependency ts h = case filter (\(_,pegs,_,_) -> h `elem` pegs) ts of
 --------------------------------------------------------------------------------
 -- Debug
 
-data Vertex = RootVertex | Vertex [CompStmt] deriving (Eq)
+data Vertex = RootVertex | Vertex CompStmt deriving (Eq,Show,Ord)
 type CompGraph = Graph Vertex PegIndex
 type PegIndex = Int
 
@@ -834,7 +835,7 @@ mkGraph' trc cs
                       (mkArcs trc cs)
 
 mkVertex :: CompStmt -> Vertex
-mkVertex c = Vertex [c]
+mkVertex c = Vertex c
 
 mkArcs :: Trace -> [CompStmt] -> [Arc CompStmt PegIndex]
 mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
@@ -848,9 +849,6 @@ mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
 
 --------------------------------------------------------------------------------
 -- Evaluate and display.
-
--- tracedEval :: Expr -> (Expr,CompGraph)
--- tracedEval = mkGraph . mkStmts . evaluate
 
 dispTxt :: Expr -> IO ()  
 dispTxt = disp' (putStrLn . shw)
@@ -868,7 +866,7 @@ showVertex v = (showVertex' v, "")
 
 showVertex' :: Vertex -> String
 showVertex' RootVertex  = "Root"
-showVertex' (Vertex cs) = (foldl (++) "") . (map showCompStmt) $ cs
+showVertex' (Vertex c) = showCompStmt c
 
 showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt l i r h j) = r
@@ -887,3 +885,8 @@ disp' f expr = do
   where (reduct,trc,messages) = evaluate' expr
         strc = "\n\nReduct: " ++ show reduct
                ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
+
+findFaulty :: Expr -> [Vertex]
+findFaulty = findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
+  where j RootVertex = Right
+        j (Vertex c) = stmtJudgement c
