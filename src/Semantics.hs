@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable, StandaloneDeriving #-}
 module Semantics where
 
 import Prelude hiding (Right)
@@ -5,6 +6,8 @@ import Control.Monad.State
 import Data.Graph.Libgraph
 import Data.List (nub,(\\),find)
 import Test.QuickCheck
+import Data.Data hiding (Infix,Prefix)
+import Data.Generics.Schemes(listify)
 
 --------------------------------------------------------------------------------
 -- Expressions
@@ -22,13 +25,16 @@ data Expr = Lambda     Name Expr
 
           | Print      Expr
           | Exception  String
-          deriving (Show,Eq)
+          deriving (Show,Eq,Data,Typeable)
+
+deriving instance Data Judgement
+deriving instance Typeable Judgement
 
 type Label    = String
 
 data ConstrId = WrongConstr 
               | ConstrId Int 
-              deriving (Eq,Ord)
+              deriving (Eq,Ord,Data,Typeable)
 
 instance Show ConstrId where show WrongConstr  = ":("
                              show (ConstrId i) = "c_" ++ show i
@@ -528,7 +534,7 @@ type UID = Int
 type ParentPosition = Int
 
 data Parent = Parent {parentUID :: UID,  parentPosition :: ParentPosition} 
-              deriving (Show,Eq,Ord)
+              deriving (Show,Eq,Ord,Data,Typeable)
 
 getUniq :: State Context UID
 getUniq = do
@@ -889,12 +895,29 @@ disp' f expr = do
 -- Finding faulty program slices
 
 -- Evaluate, and use algorithmic debugging on result
-algoDebug :: Expr -> [Vertex]
-algoDebug = findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
+algoDebug :: Expr -> [Label]
+algoDebug = map getLbl . findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
   where j RootVertex = Right
         j (Vertex c) = stmtJudgement c
+        getLbl (Vertex c) = stmtLabel c
+        getLbl RootVertex = error "Algorithmic debugging marked root as faulty!"
 
 -- Extract program slices we marked as faulty
+markedFaulty :: Expr -> [Label]
+markedFaulty = map getLabel . listify isMarked
+
+  where isMarked :: Expr -> Bool
+        isMarked (Observe _ Wrong _) = True
+        isMarked _                   = False
+
+        getLabel :: Expr -> Label
+        getLabel (Observe l Wrong _) = l
+        getLabel _                   = "Filtered wrong Expr in markedFaulty!"
+ 
+        -- MF TODO: rather than map over listify results do something with gfoldl here?
+        -- addF :: [Label] -> Expr -> [Label]
+        -- addF ls (Observe l Wrong _) = l : ls
+        -- addF ls _                   = ls
 
 --------------------------------------------------------------------------------
 -- Generating random expressions
