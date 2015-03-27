@@ -4,7 +4,7 @@ module Semantics where
 import Prelude hiding (Right)
 import Control.Monad.State
 import Data.Graph.Libgraph
-import Data.List (nub,(\\),find)
+import Data.List (nub,(\\),find,isPrefixOf,sort)
 import Test.QuickCheck
 import Data.Data hiding (Infix,Prefix)
 import Data.Generics.Schemes(listify)
@@ -918,6 +918,15 @@ markedFaulty = map getLabel . listify isMarked
         -- addF :: [Label] -> Expr -> [Label]
         -- addF ls (Observe l Wrong _) = l : ls
         -- addF ls _                   = ls
+
+--------------------------------------------------------------------------------
+-- QuickCheck soundness property
+
+subsetOf :: Ord a => [a] -> [a] -> Bool
+subsetOf xs ys = isPrefixOf (sort xs) (sort ys)
+
+prop_actuallyFaulty :: Expr -> Property
+prop_actuallyFaulty e = property $ algoDebug e `subsetOf` markedFaulty e
 
 --------------------------------------------------------------------------------
 -- Generating random expressions
