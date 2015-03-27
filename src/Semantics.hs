@@ -925,11 +925,28 @@ markedFaulty = map getLabel . listify isMarked
 subsetOf :: Ord a => [a] -> [a] -> Bool
 subsetOf xs ys = isPrefixOf (sort xs) (sort ys)
 
+nonEmptyTrace :: Expr -> Bool
+nonEmptyTrace = not . null . snd . evaluate
+
 prop_actuallyFaulty :: Expr -> Property
-prop_actuallyFaulty e = property $ algoDebug e `subsetOf` markedFaulty e
+prop_actuallyFaulty e = nonEmptyTrace e ==> property $ algoDebug e `subsetOf` markedFaulty e
 
 --------------------------------------------------------------------------------
 -- Generating random expressions
+
+gen_expr :: Int -> Gen Expr
+gen_expr 0 = gen_constr
+gen_expr n = oneof [ gen_constr
+                   , gen_var
+                   , gen_case n
+                   , liftM2 Lambda gen_varName (gen_expr $ n-1)
+                   , liftM2 Apply  (gen_expr $ n-1) gen_varName
+                   , liftM3 mkLet  gen_varName (gen_expr $ (n-1) `div` 2) (gen_expr $ (n-1) `div` 2)
+                   , liftM3 Observe gen_label gen_jmt (gen_expr $ n-1)
+                   ]
+  where gen_label         = elements $ map (:[]) ['A'..'Z']
+        gen_jmt           = elements [Right, Wrong]
+        mkLet a e1 e2     = Let (a,e1) e2
 
 gen_varName :: Gen String
 gen_varName = elements $ map (:[]) ['a'..'i']
@@ -939,28 +956,14 @@ gen_var = liftM Var gen_varName
 
 gen_constr :: Gen Expr
 gen_constr = oneof [ elements [c_0 [], c_1 [], c_2 []]
-                     , liftM2 (\v1 v2 -> c_3 [v1,v2]) gen_varName gen_varName
-                     ]
+                   , liftM2 (\v1 v2 -> c_3 [v1,v2]) gen_varName gen_varName
+                   ]
 
 gen_case :: Int -> Gen Expr
 gen_case n = return mkCase `ap` gen_expr' `ap` gen_expr' `ap` gen_expr' `ap` gen_expr' `ap` gen_expr' 
                            `ap` gen_varName `ap` gen_varName
   where mkCase e e0 e1 e2 e3 n1 n2 = Case e [(c_0 [],e0),(c_1 [],e1),(c_2 [],e2),(c_3 [n1,n2],e3)]
-        gen_expr' = gen_expr $ (n `div` 7) - 1
-
-gen_expr :: Int -> Gen Expr
-gen_expr 0 = gen_constr
-gen_expr n = oneof [ gen_constr
-                   , gen_var
-                   , gen_case n
-                   , liftM2 Lambda gen_varName (gen_expr $ n-1)
-                   , liftM2 Apply  (gen_expr $ n-1) gen_varName
-                   , liftM3 mkLet  gen_varName (gen_expr $ n-1 `div` 2) (gen_expr $ n-1 `div` 2)
-                   , liftM3 Observe gen_label gen_jmt (gen_expr $ n-1)
-                   ]
-  where gen_label         = elements $ map (:[]) ['A'..'Z']
-        gen_jmt           = elements [Right, Wrong]
-        mkLet a e1 e2     = Let (a,e1) e2
+        gen_expr' = gen_expr $ (n - 1) `div` 7
 
 uniqueLabels :: Expr -> Expr
 uniqueLabels e = snd (uniqueLabels' lbls e)
