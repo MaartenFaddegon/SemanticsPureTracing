@@ -190,6 +190,35 @@ ex5b = Let ("h", Observe "h" Wrong (Lambda "y" $ Var "y"))
      $ Let ("k", c_1 [])
      $ Print $ Apply (Var "f") "k"
 
+-- Example 6:
+--  There are different computation trees that are sound for algorithmic
+--  debugging. Functions as arguments can be represented in different ways
+--  but that also means that different dependencies are needed for a tree
+--  to be sound. We represent functions as a finite mapping thus we should
+--  create the dependencies that fit that.
+
+ex6 :: Expr
+ex6 = Let ("not",  Observe "not"  Wrong (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])]))
+    $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Apply (Var "f") "x"))
+    $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
+    $ Let ("y",    c_1 [])
+    $ {-in-} Apply (Var "main") "y"
+
+ex7a :: Expr
+ex7a = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
+     $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "not") "x") 
+                                                                  $ Apply (Var "f") "y"))
+     $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
+     $ Let ("y",    c_1 [])
+     $ {-in-} Apply (Var "main") "y"
+
+ex7b :: Expr
+ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
+     $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "f") "x") 
+                                                                  $ Apply (Var "not") "y"))
+     $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
+     $ Let ("y",    c_1 [])
+     $ {-in-} Apply (Var "main") "y"
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -344,10 +373,15 @@ reduce (Var x) = do
 
 reduce (Observe l jmt e) = do
   uid <- getUniq
-  doTrace (RootEvent l uid)
+  doTrace (RootEvent uid l)
   eval (Observed (Parent uid 1) jmt e)
 
-reduce (Observed p jmt e) = do
+reduce (Observed q jmt e) = do
+
+  j <- getUniq
+  doTrace (EnterEvent j q)
+  let p = Parent j 1
+
   w <- eval e
   case w of
     Exception msg ->
@@ -360,7 +394,7 @@ reduce (Observed p jmt e) = do
       i <- getUniq
       doTrace (ConstEvent i p t (length ns))
       ms <- mapM getFreshVar ns
-      eval $ foldl (\e' (m,n,j) -> Let (m, Observed (Parent i j) jmt (Var n)) e')
+      eval $ foldl (\e' (m,n,k) -> Let (m, Observed (Parent i k) jmt (Var n)) e')
                    (Constr t ms) (zip3 ms ns [1..])
 
     -- ObsL rule in paper
@@ -373,7 +407,7 @@ reduce (Observed p jmt e) = do
     e' -> 
       return (Exception $ "Observe undefined: " ++ show e')
 
--- ObsF rule in paper
+-- Obs_lambda rule in paper
 -- Note how the Judgement is only passed on to the result, not the argument.
 reduce (FunObs p jmt x x1 e) = do
       i  <- getUniq
@@ -500,24 +534,11 @@ getFreshVar n = do
 type Trace = [Event]
 
 data Event
-  = RootEvent
-    { eventLabel     :: Label
-    , eventUID       :: UID
-    } 
-  | ConstEvent
-    { eventUID       :: UID
-    , eventParent    :: Parent
-    , eventRepr      :: ConstrId
-    , eventLength    :: Int
-    }
-  | LamEvent
-    { eventUID       :: UID
-    , eventParent    :: Parent
-    }
-  | AppEvent
-    { eventUID       :: UID
-    , eventParent    :: Parent
-    }    
+  = RootEvent  { eventUID :: UID, eventLabel :: Label }
+  | EnterEvent { eventUID :: UID, eventParent :: Parent}
+  | ConstEvent { eventUID :: UID, eventParent :: Parent, eventRepr :: ConstrId , eventLength :: Int}
+  | LamEvent   { eventUID :: UID, eventParent :: Parent}
+  | AppEvent   { eventUID :: UID, eventParent :: Parent}
   deriving (Show,Eq,Ord)
 
 data CompStmt
@@ -572,7 +593,7 @@ mkStmts (reduct,trc) = (reduct,trc, map (mkStmt forest) roots)
         forest = mkEventForest trc
 
 mkStmt :: EventForest -> Event -> CompStmt
-mkStmt forest (e@(RootEvent lbl _)) = CompStmt lbl i repr h j
+mkStmt forest (e@(RootEvent{eventLabel=lbl})) = CompStmt lbl i repr h j
 
         where i :: [UID]
               i = treeUIDs forest e
@@ -580,11 +601,13 @@ mkStmt forest (e@(RootEvent lbl _)) = CompStmt lbl i repr h j
               repr :: String
               repr = dfsFold Infix pre post "" Trunk (Just e) forest
               pre Nothing                         _ = (++" _")
+              pre (Just EnterEvent{})             _ = id
               pre (Just RootEvent{eventLabel=l})  _ = (++l)
               pre (Just ConstEvent{eventRepr=r})  _ = (++" ("++show r)
               pre (Just LamEvent{})               _ = (++" {")
               pre (Just AppEvent{})               _ = (++" ->")
               post Nothing                        _ = id
+              post (Just EnterEvent{})            _ = id
               post (Just RootEvent{})             _ = id
               post (Just ConstEvent{})            _ = (++")")
               post (Just LamEvent{})              _ = (++"}")
@@ -618,10 +641,9 @@ judgeEventList forest = bool2jmt . (all isRight) . (map judgeME)
 
 
 treeUIDs :: EventForest -> Event -> [UID]
-treeUIDs forest r = reverse $ dfsFold Prefix addUID nop [] Trunk (Just r) forest
+treeUIDs forest r = reverse $ dfsFold Prefix addUID idVisit [] Trunk (Just r) forest
   where addUID (Just e) _ is = eventUID e : is
         addUID Nothing  _ is = is
-        nop    _        _ is = is
 
 data InfixOrPrefix = Infix | Prefix
 
@@ -644,6 +666,9 @@ argNum Trunk            = 1
 
 type Visit a = Maybe Event -> Location -> a -> a
 
+idVisit :: Visit a
+idVisit _ _ z = z
+
 -- Given an event, return the list of (expected) children in depth-first order.
 --
 -- Nothing indicates that we expect an event (e.g. the argument of an application-
@@ -655,6 +680,7 @@ type Visit a = Maybe Event -> Location -> a -> a
 
 dfsChildren :: EventForest -> Event -> [Maybe Event]
 dfsChildren forest e = case e of
+    EnterEvent{}              -> byPosition [1]
     RootEvent{}               -> byPosition [1]
     ConstEvent{eventLength=l} -> byPosition [1..l]
     LamEvent{}                -> map (Just . snd) cs
@@ -727,40 +753,24 @@ addToScopes ss l i  = map add ss
                   Res -> s{resIds=i:resIds s}
 
 holes :: EventForest -> Event -> [Hole]
-holes forest rootEvent = snd $ dfsFold Prefix pre post z Trunk (Just rootEvent) forest
+holes forest r = map hole rs
+  where rs = resultEvents forest r
+        js = treeUIDs forest r
+        hole (ent,_) = let is = treeUIDs forest ent
+                       in Hole [i | i <- [minimum is .. maximum is], i `notElem` js]
 
-  where z :: ([AppScope], [Hole])
-        z = ([],[])
-
-        uids = treeUIDs forest rootEvent
-
-        -- On dfs previsit collect ids per subtree
-        pre :: Visit ([AppScope],[Hole])
-        pre Nothing                        _ x       = x
-        pre (Just ConstEvent{eventUID=i})  l (ss,hs) = (addToScopes ss l i, hs)
-        pre (Just RootEvent{})             _ x       = x
-        pre (Just LamEvent{eventUID=i})    l (ss,hs) = (addToScopes ss l i, hs)
-        pre (Just e@AppEvent{eventUID=i})  l (ss,hs)
-          | hasFinalRes e = (newScope l:ss,hs)
-          | otherwise     = (addToScopes ss l i, hs)
-   
-        -- On dfs postvisit calculate holes using collected ids
-        post :: Visit ([AppScope],[Hole])
-        post Nothing                        _ x = x
-        post (Just ConstEvent{})            _ x = x
-        post (Just RootEvent{})             _ x = x
-        post (Just LamEvent{})              _ x = x
-        post (Just e@AppEvent{})            _ x
-          | hasFinalRes e  = let ((Scope _ as rs):ss,hs)  = x
-                                 m = minimum [(maximum as) + 1, minimum rs]
-                                 h = Hole [j | j <- [m .. maximum rs], j `notElem` uids]
-                             in (ss, h:hs)
-          | otherwise      = x
-
-        hasFinalRes :: Event -> Bool
-        hasFinalRes e = let [_,res] = dfsChildren forest e in case res of
-          (Just ConstEvent{}) -> True
-          _                   -> False
+-- Given the root of a tree in the forest, return for all final-result subtrees
+-- the pair of (EnterEvent,ConstEvent) from the root the subtree.
+resultEvents :: EventForest -> Event -> [(Event,Event)]
+resultEvents forest r = dfsFold Prefix pre idVisit [] Trunk (Just r) forest
+  where pre :: Visit [(Event,Event)]
+        pre (Just app@AppEvent{}) _ es = let [_,res] = dfsChildren forest app
+                                         in case res of
+                                              (Just ent@EnterEvent{}) -> case head $ dfsChildren forest ent of
+                                                                           (Just con@ConstEvent{}) -> (ent,con) : es
+                                                                           _                       -> es
+                                              _                       -> es
+        pre _                   _ es   = es
 
 -- Infering dependencies from events
 
@@ -783,11 +793,6 @@ dependencies forest rs = loop ts0 []
                         else let (ts'',a) = oneDependency ts' 
                              in  if ts'' == ts' then error "dependencies got stuck"
                                                 else loop ts'' (a:as)
-
--- Find a list of holes between arguments and result
--- resHoles :: EventForest -> Event -> [Hole]
--- resHoles forest = (filter $ \h -> case h of (ResHole _ _) -> True; _ -> False) . (holes forest)
-
 
 -- Resolve the first dependency for which we find a matching hole/peg pair, and remove
 -- the hole and any overlapping holes between parent/child from the parent.
@@ -932,7 +937,7 @@ prop_actuallyFaulty :: Expr -> Property
 prop_actuallyFaulty e = nonEmptyTrace e ==> property $ algoDebug e `subsetOf` markedFaulty e
 
 --------------------------------------------------------------------------------
--- Generating random expressions
+-- Generating random expressions with observed abstractions
 
 gen_expr :: Int -> Gen Expr
 gen_expr 0 = gen_constr
@@ -942,11 +947,19 @@ gen_expr n = oneof [ gen_constr
                    , liftM2 Lambda gen_varName (gen_expr $ n-1)
                    , liftM2 Apply  (gen_expr $ n-1) gen_varName
                    , liftM3 mkLet  gen_varName (gen_expr $ (n-1) `div` 2) (gen_expr $ (n-1) `div` 2)
-                   , liftM3 Observe gen_label gen_jmt (gen_expr $ n-1)
+                   , gen_observedLam n
                    ]
-  where gen_label         = elements $ map (:[]) ['A'..'Z']
-        gen_jmt           = elements [Right, Wrong]
-        mkLet a e1 e2     = Let (a,e1) e2
+        where mkLet a e1 e2 = Let (a,e1) e2
+
+gen_label :: Gen Label
+gen_label = elements $ map (:[]) ['A'..'Z']
+
+gen_jmt :: Gen Judgement
+gen_jmt = elements [Right, Wrong]
+
+gen_observedLam :: Int -> Gen Expr
+gen_observedLam n = return oLam `ap` gen_label `ap` gen_jmt `ap` gen_varName `ap` (gen_expr $ n-2)
+  where oLam l j v e = Observe l j (Lambda v e)
 
 gen_varName :: Gen String
 gen_varName = elements $ map (:[]) ['a'..'i']
