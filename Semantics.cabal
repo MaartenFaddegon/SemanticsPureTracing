@@ -12,4 +12,4 @@ Executable Semantics-test
   main-is:           Test.hs
   other-modules:     Semantics
   default-language:  Haskell2010
-  GHC-Options:       -Wall -fno-warn-unused-do-bind
+  GHC-Options:       -Wall -fno-warn-unused-do-bind -fno-warn-orphans

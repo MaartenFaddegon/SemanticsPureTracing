@@ -212,6 +212,9 @@ ex7a = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
      $ Let ("y",    c_1 [])
      $ {-in-} Apply (Var "main") "y"
 
+traceEx7a :: Trace
+traceEx7a = reverse . snd . evaluate $ ex7a
+
 ex7b :: Expr
 ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
      $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "f") "x") 
@@ -219,6 +222,10 @@ ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
      $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
      $ Let ("y",    c_1 [])
      $ {-in-} Apply (Var "main") "y"
+
+
+traceEx7b :: Trace
+traceEx7b = reverse . snd . evaluate $ ex7b
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -259,8 +266,6 @@ prelude e = Let ("map", Lambda "f" $ Lambda "xs"
                           $ Let ("z", c_2 [])
                           $ Apply (Apply (Apply (Var "foldl") "f") "z") "xs")
           $ e
-
-
 
 --------------------------------------------------------------------------------
 -- The state
@@ -571,6 +576,44 @@ doTrace rec = do
 --------------------------------------------------------------------------------
 -- Trace post processing
 
+analyseTrace :: Trace -> IO()
+analyseTrace trc = do
+  let rs   = filter isRoot trc
+      frt  = mkEventForest trc
+      cs   = map (mkStmt frt) rs
+  putStrLn $ "Trace has " ++ (show . length $ trc) ++ " events."
+  putStrLn $ "Trace has " ++ (show . length $ rs)  ++ " root events: " ++ (commaList . (map eventUID) $ rs)
+  -- print statement representations
+  mapM_ (\(r,c) -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ ": " ++ stmtRepr c) $ zip rs cs
+  -- print lists of UIDs of the subtrees that describe the constant results
+  mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " result events: " ++ (commaList . (map $ map eventUID) $ resultEvents frt r)) rs
+
+analyseDependency :: Trace -> [UID] -> IO ()
+analyseDependency trc hs = loop hs 
+  where rs   = filter isRoot trc
+        frt  = mkEventForest trc
+
+        r2us :: [(UID,[UID])]
+        r2us = map (\r -> (eventUID r,treeUIDs frt r)) rs
+
+        u2r :: [(UID,UID)]
+        u2r  = foldl (\z (r,us) -> z ++ (map (\u -> (u,r)) us)) [] r2us
+
+        loop :: [UID] -> IO ()
+        loop [] = putStrLn "Done."
+        loop xs = do putStrLn $ "Holes: " ++ show xs
+                     let (Just r)  = lookup (last xs) u2r
+                         (Just us) = lookup r r2us
+                     putStrLn $ "Depends on Stmt-" ++ show r
+                     loop (xs \\ us)
+
+commaList :: Show a => [a] -> String
+commaList xs = case xs of
+  []  -> "-"
+  [x] -> show x
+  _   -> let (h:ys) = init xs
+         in (foldl (\s x -> s ++ ", " ++ show x) (show h) ys) ++ " and " ++ show (last xs)
+
 -- Searchable mapping from UID of the parent and position in list of siblings
 -- to a child event.
 type EventForest = [(UID, [(Int, Event)])]
@@ -587,19 +630,19 @@ mkEventForest trc = map children trc
         chds = filter (not . isRoot) trc
 
 mkStmts :: (Expr,Trace) -> (Expr,Trace,[CompStmt])
-mkStmts (reduct,trc) = (reduct,trc, map (mkStmt forest) roots)
+mkStmts (reduct,trc) = (reduct,trc, map (mkStmt frt) roots)
 
   where roots = filter isRoot trc
-        forest = mkEventForest trc
+        frt = mkEventForest trc
 
 mkStmt :: EventForest -> Event -> CompStmt
-mkStmt forest (e@(RootEvent{eventLabel=lbl})) = CompStmt lbl i repr h j
+mkStmt frt (e@(RootEvent{eventLabel=lbl})) = CompStmt lbl i repr h j
 
         where i :: [UID]
-              i = treeUIDs forest e
+              i = treeUIDs frt e
 
               repr :: String
-              repr = dfsFold Infix pre post "" Trunk (Just e) forest
+              repr = dfsFold Infix pre post "" Trunk (Just e) frt
               pre Nothing                         _ = (++" _")
               pre (Just EnterEvent{})             _ = id
               pre (Just RootEvent{eventLabel=l})  _ = (++l)
@@ -614,36 +657,31 @@ mkStmt forest (e@(RootEvent{eventLabel=lbl})) = CompStmt lbl i repr h j
               post (Just AppEvent{})              _ = id
 
               h :: [Hole]
-              h = holes forest e
+              h = holes frt e
 
               j :: Judgement
-              j = judgeTree forest e
+              j = judgeTree frt e
 mkStmt _ e = error $ "mkStmt should be given RootEvent, was given " ++ show e
 
 judgeTree :: EventForest -> Event -> Judgement
-judgeTree forest e@AppEvent{} 
-  = let [arg,res] = dfsChildren forest e
-    in case (judgeEventList forest [arg],judgeEventList forest [res]) of
+judgeTree frt e@AppEvent{} 
+  = let [arg,res] = dfsChildren frt e
+    in case (judgeEventList frt [arg],judgeEventList frt [res]) of
          (Right,jmt)     -> jmt
          (Wrong,_  )     -> Right
          (Unassessed, _) -> error "judgeTree expected Right or Wrong, got Unassessed"
 judgeTree _ ConstEvent{eventRepr=WrongConstr} = Wrong
-judgeTree forest e = judgeEventList forest (dfsChildren forest e)
+judgeTree frt e = judgeEventList frt (dfsChildren frt e)
 
 judgeEventList :: EventForest -> [Maybe Event] -> Judgement
-judgeEventList forest = bool2jmt . (all isRight) . (map judgeME)
+judgeEventList frt = bool2jmt . (all isRight) . (map judgeME)
   where judgeME Nothing  = Right
-        judgeME (Just e) = judgeTree forest e
+        judgeME (Just e) = judgeTree frt e
         isRight Right    = True
         isRight _        = False
         bool2jmt True    = Right
         bool2jmt _       = Wrong
 
-
-treeUIDs :: EventForest -> Event -> [UID]
-treeUIDs forest r = reverse $ dfsFold Prefix addUID idVisit [] Trunk (Just r) forest
-  where addUID (Just e) _ is = eventUID e : is
-        addUID Nothing  _ is = is
 
 data InfixOrPrefix = Infix | Prefix
 
@@ -679,7 +717,7 @@ idVisit _ _ z = z
 -- order we find them in the trace (i.e. evaluation order).
 
 dfsChildren :: EventForest -> Event -> [Maybe Event]
-dfsChildren forest e = case e of
+dfsChildren frt e = case e of
     EnterEvent{}              -> byPosition [1]
     RootEvent{}               -> byPosition [1]
     ConstEvent{eventLength=l} -> byPosition [1..l]
@@ -690,33 +728,33 @@ dfsChildren forest e = case e of
         byPosition :: [ParentPosition] -> [Maybe Event]
         byPosition = map (\pos -> lookup pos cs)
 
-        -- Events in the forest that list our event as parent (in no particular order).
+        -- Events in the frt that list our event as parent (in no particular order).
         cs :: [(ParentPosition,Event)]
-        cs = case lookup (eventUID e) forest of (Just cs') -> cs'; _ -> []
+        cs = case lookup (eventUID e) frt of (Just cs') -> cs'; _ -> []
 
         
 dfsFold :: InfixOrPrefix -> Visit a -> Visit a -> a 
         -> Location -> (Maybe Event) -> EventForest -> a
 
-dfsFold ip pre post z w me forest 
+dfsFold ip pre post z w me frt 
   = post me w $ case me of
       Nothing -> z'
 
       (Just (AppEvent _ _)) -> let [arg,res] = cs
         in case ip of
           Prefix -> csFold $ zip cs [ArgumentOf w,ResultOf w]
-          Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf w) arg forest
+          Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf w) arg frt
                         z2 = pre me w z1
-                    in  dfsFold ip pre post z2 (ResultOf w) res forest
+                    in  dfsFold ip pre post z2 (ResultOf w) res frt
 
       _ -> csFold $ zip cs (repeat w)
 
   where z'  = pre me w z
 
         cs :: [Maybe Event]
-        cs = case me of (Just e) -> dfsChildren forest e; Nothing -> error "dfsFold filter failed"
+        cs = case me of (Just e) -> dfsChildren frt e; Nothing -> error "dfsFold filter failed"
 
-        csFold = foldl (\z'' (c,w') -> dfsFold ip pre post z'' w' c forest) z'
+        csFold = foldl (\z'' (c,w') -> dfsFold ip pre post z'' w' c frt) z'
 
 --------------------------------------------------------------------------------
 -- Pegs and holes in event trees
@@ -725,8 +763,6 @@ data Hole = Hole { holeIds :: [UID] } deriving (Eq,Ord,Show)
 
 delIds :: Hole -> [UID] -> Hole
 delIds (Hole is) js = Hole (is \\ js)
--- delIds (ArgHole i is) js = ArgHole i (is \\ js)
--- delIds (ResHole i is) js = ResHole i (is \\ js)
 
 (\\\) :: Hole -> Hole -> Hole
 h \\\ k = delIds h (holeIds k)
@@ -753,20 +789,56 @@ addToScopes ss l i  = map add ss
                   Res -> s{resIds=i:resIds s}
 
 holes :: EventForest -> Event -> [Hole]
-holes forest r = map hole rs
-  where rs = resultEvents forest r
-        js = treeUIDs forest r
-        hole (ent,_) = let is = treeUIDs forest ent
+holes frt r = map hole rs
+  where rs = resultPair frt r
+        js = treeUIDs frt r
+        hole (ent,_) = let is = treeUIDs frt ent
                        in Hole [i | i <- [minimum is .. maximum is], i `notElem` js]
 
--- Given the root of a tree in the forest, return for all final-result subtrees
+
+-- An event tree can have multiple applications. An application can have a function
+-- map as argument or as result with more applications in it. In this function we
+-- are interested in finding the results of applications that are a constant value.
+-- For each constant value we return a depth first ordered list of events that describe
+-- the constant value.
+resultEvents :: EventForest -> Event -> [[Event]]
+resultEvents frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
+  where pre :: Visit [[Event]]
+        pre (Just app@AppEvent{}) _ es = case dfsChildren frt app of
+                [_,(Just ent)] -> if isConstantTree frt ent then (eventsInTree frt ent) : es else es
+                _              -> es
+        pre _                     _ es = es
+
+-- Is given event the root of a (sub)tree describing a constant value?
+-- Note that root must be an EnterEvent.
+isConstantTree :: EventForest -> Event -> Bool
+isConstantTree frt ent = case ent of 
+  EnterEvent{} -> case head $ dfsChildren frt ent of
+    (Just ConstEvent{}) -> True
+    _                   -> False
+  _            -> False
+
+
+-- Given an event r, return depth first ordered list of events in the (sub)tree starting from r.
+eventsInTree :: EventForest -> Event -> [Event]
+eventsInTree frt r = reverse $ dfsFold Prefix add idVisit [] Trunk (Just r) frt
+  where add (Just e) _ es = e : es
+        add Nothing  _ es = es
+
+treeUIDs :: EventForest -> Event -> [UID]
+treeUIDs frt = (map eventUID) . eventsInTree frt
+-- treeUIDs frt r = reverse $ dfsFold Prefix addUID idVisit [] Trunk (Just r) frt
+--   where addUID (Just e) _ is = eventUID e : is
+--         addUID Nothing  _ is = is
+
+-- Given the root of a tree in the frt, return for all final-result subtrees
 -- the pair of (EnterEvent,ConstEvent) from the root the subtree.
-resultEvents :: EventForest -> Event -> [(Event,Event)]
-resultEvents forest r = dfsFold Prefix pre idVisit [] Trunk (Just r) forest
+resultPair :: EventForest -> Event -> [(Event,Event)]
+resultPair frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
   where pre :: Visit [(Event,Event)]
-        pre (Just app@AppEvent{}) _ es = let [_,res] = dfsChildren forest app
+        pre (Just app@AppEvent{}) _ es = let [_,res] = dfsChildren frt app
                                          in case res of
-                                              (Just ent@EnterEvent{}) -> case head $ dfsChildren forest ent of
+                                              (Just ent@EnterEvent{}) -> case head $ dfsChildren frt ent of
                                                                            (Just con@ConstEvent{}) -> (ent,con) : es
                                                                            _                       -> es
                                               _                       -> es
@@ -781,10 +853,10 @@ type TreeDescr  = (Event  -- Root event
                   ,[UID]) -- Inherited UIDs (of child events)
 
 dependencies :: EventForest -> Trace -> [Dependency]
-dependencies forest rs = loop ts0 []
+dependencies frt rs = loop ts0 []
 
   where ts0 :: [TreeDescr]
-        ts0 = map (\r -> let is = treeUIDs forest r in (r, is, holes forest r, is)) rs
+        ts0 = map (\r -> let is = treeUIDs frt r in (r, is, holes frt r, is)) rs
 
         loop :: [TreeDescr] -> [Dependency] -> [Dependency]
         loop ts as = let ts' = map (\(e,is,hs,js) -> (e,is,rmEmpty hs,js)) ts
@@ -850,8 +922,8 @@ mkVertex c = Vertex c
 
 mkArcs :: Trace -> [CompStmt] -> [Arc CompStmt PegIndex]
 mkArcs trc cs = map (\(i,j,h) -> Arc (findC i) (findC j) h) ds
-  where forest  = mkEventForest trc
-        ds      = dependencies forest roots
+  where frt     = mkEventForest trc
+        ds      = dependencies frt roots
         findC i = case find (\c -> i `elem` stmtUID c) cs of Just c -> c; Nothing -> error "mkArcs: non-existant peg?"
         roots   = filter isRoot trc
 
