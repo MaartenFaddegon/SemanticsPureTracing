@@ -175,20 +175,26 @@ ex4 = {- import -} prelude
 --      a) f -> g -> h
 --      b) f -> g, f -> h
 ex5a :: Expr
-ex5a = Let ("h", Observe "h" Wrong $ Lambda "y" $ Var "y")
+ex5a = Let ("h", Observe "h" Right $ Lambda "y" $ Var "y")
      $ Let ("g", Observe "g" Right $ Lambda "y" $ Apply (Var "h") "y")
      $ Let ("f", Observe "f" Right $ Lambda "y" $ Apply (Var "g") "y")
      $ Let ("k", c_1 [])
      $ Print $ Apply (Var "f") "k"
 
+traceEx5a :: Trace
+traceEx5a = reverse . snd . evaluate $ ex5a
+
 ex5b :: Expr
-ex5b = Let ("h", Observe "h" Wrong (Lambda "y" $ Var "y"))
+ex5b = Let ("h", Observe "h" Right (Lambda "y" $ Var "y"))
      $ Let ("g", Observe "g" Right (Lambda "y" $ Var "y"))
      $ Let ("f", Observe "f" Right (Lambda "y" $ Let ("z", Apply (Var "g") "y")
                                                                (Apply (Var "h") "z")
                                              ))
      $ Let ("k", c_1 [])
      $ Print $ Apply (Var "f") "k"
+
+traceEx5b :: Trace
+traceEx5b = reverse . snd . evaluate $ ex5b
 
 -- Example 6:
 --  There are different computation trees that are sound for algorithmic
@@ -587,6 +593,8 @@ analyseTrace trc = do
   mapM_ (\(r,c) -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ ": " ++ stmtRepr c) $ zip rs cs
   -- print lists of UIDs of the subtrees that describe the constant results
   mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " result events: " ++ (commaList . (map $ map eventUID) $ resultEvents frt r)) rs
+  -- print lists of UIDs of the subtrees that describe all arguments:
+  mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " arguments: " ++ (commaList . (map $ map eventUID) $ argEvents frt r)) rs
 
 analyseDependency :: Trace -> [UID] -> IO ()
 analyseDependency trc hs = loop hs 
@@ -795,6 +803,14 @@ holes frt r = map hole rs
         hole (ent,_) = let is = treeUIDs frt ent
                        in Hole [i | i <- [minimum is .. maximum is], i `notElem` js]
 
+
+argEvents :: EventForest -> Event -> [[Event]]
+argEvents frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
+  where pre :: Visit [[Event]]
+        pre (Just app@AppEvent{}) _ es = case dfsChildren frt app of
+                [(Just ent),_] -> (eventsInTree frt ent) : es
+                _              -> es
+        pre _                     _ es = es
 
 -- An event tree can have multiple applications. An application can have a function
 -- map as argument or as result with more applications in it. In this function we
