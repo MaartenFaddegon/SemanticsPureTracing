@@ -579,6 +579,7 @@ doTrace rec = do
   doLog $ "* " ++ show rec
   modify $ \cxt -> cxt{trace = rec : trace cxt}
 
+
 --------------------------------------------------------------------------------
 -- Trace post processing
 
@@ -704,12 +705,6 @@ argOrRes (ResultOf loc')   loc = if loc == loc' then Res else argOrRes loc' loc
 argOrRes Trunk             _   = error $ "argOrRes: Second location is not on the path"
                                        ++ "between root and the first location."
 
--- 
-argNum :: Location -> Int
-argNum (ResultOf loc)   = 1 + (argNum loc)
-argNum (ArgumentOf loc) = argNum loc
-argNum Trunk            = 1
-
 type Visit a = Maybe Event -> Location -> a -> a
 
 idVisit :: Visit a
@@ -803,6 +798,10 @@ holes frt r = map hole rs
         hole (ent,_) = let is = treeUIDs frt ent
                        in Hole [i | i <- [minimum is .. maximum is], i `notElem` js]
 
+data SubTree = SubTree Location [Event]
+
+constants :: EventForest -> Event -> SubTree
+constants frt r = undefined
 
 argEvents :: EventForest -> Event -> [[Event]]
 argEvents frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
