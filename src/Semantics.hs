@@ -4,7 +4,8 @@ module Semantics where
 import Prelude hiding (Right)
 import Control.Monad.State
 import Data.Graph.Libgraph
-import Data.List (nub,(\\),find,isPrefixOf,sort)
+import Data.List (nub,(\\),find,isPrefixOf,sort,sortBy)
+import Data.Ord (comparing)
 import Test.QuickCheck
 import Data.Data hiding (Infix,Prefix)
 import Data.Generics.Schemes(listify)
@@ -545,7 +546,7 @@ getFreshVar n = do
 type Trace = [Event]
 
 data Event
-  = RootEvent  { eventUID :: UID, eventLabel :: Label }
+  = RootEvent  { eventUID :: UID, eventLabel  :: Label }
   | EnterEvent { eventUID :: UID, eventParent :: Parent}
   | ConstEvent { eventUID :: UID, eventParent :: Parent, eventRepr :: ConstrId , eventLength :: Int}
   | LamEvent   { eventUID :: UID, eventParent :: Parent}
@@ -581,6 +582,40 @@ doTrace rec = do
 
 
 --------------------------------------------------------------------------------
+-- Dataflow
+
+data ConstantValue = ConstantValue { valStmt :: UID, valLoc :: Location
+                                   , valMin :: UID,  valMax :: UID }
+
+instance Show ConstantValue where
+  show v = "Stmt-" ++ (show . valStmt $ v)
+         ++ "-"    ++ (show . valLoc  $ v) 
+         ++ ": "   ++ (show . valMin  $ v) 
+         ++ "-"    ++ (show . valMax  $ v) 
+
+constants :: EventForest -> Event -> [ConstantValue]
+constants frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
+  where pre :: Visit [ConstantValue]
+        pre (Just ent) loc vs
+          | isConstantTree frt ent = mkConstantValue ent loc : vs
+          | otherwise              = vs
+        pre _          _   vs      = vs
+
+        mkConstantValue :: Event -> Location -> ConstantValue
+        mkConstantValue e loc = let us = treeUIDs frt e
+                          in ConstantValue (eventUID r) loc (minimum us) (maximum us)
+
+
+-- Is given event the root of a (sub)tree describing a constant value?
+-- Note that root must be an EnterEvent.
+isConstantTree :: EventForest -> Event -> Bool
+isConstantTree frt ent = case ent of 
+  EnterEvent{} -> case head $ dfsChildren frt ent of
+    (Just ConstEvent{}) -> True
+    _                   -> False
+  _            -> False
+
+--------------------------------------------------------------------------------
 -- Trace post processing
 
 analyseTrace :: Trace -> IO()
@@ -588,14 +623,20 @@ analyseTrace trc = do
   let rs   = filter isRoot trc
       frt  = mkEventForest trc
       cs   = map (mkStmt frt) rs
+      vs   = reverse . sortBy (comparing valMax) . foldl (\z r -> z ++ constants frt r) [] $ rs
   putStrLn $ "Trace has " ++ (show . length $ trc) ++ " events."
   putStrLn $ "Trace has " ++ (show . length $ rs)  ++ " root events: " ++ (commaList . (map eventUID) $ rs)
   -- print statement representations
   mapM_ (\(r,c) -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ ": " ++ stmtRepr c) $ zip rs cs
-  -- print lists of UIDs of the subtrees that describe the constant results
-  mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " result events: " ++ (commaList . (map $ map eventUID) $ resultEvents frt r)) rs
-  -- print lists of UIDs of the subtrees that describe all arguments:
-  mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " arguments: " ++ (commaList . (map $ map eventUID) $ argEvents frt r)) rs
+  -- print constants
+  putStrLn "Constants:"
+  mapM_ print vs
+
+  -- -- print lists of UIDs of the subtrees that describe the constant results
+  -- mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " result events: " ++ (commaList . (map $ map eventUID) $ resultEvents frt r)) rs
+  -- -- print lists of UIDs of the subtrees that describe all arguments:
+  -- mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " arguments: " ++ (commaList . (map $ map eventUID) $ argEvents frt r)) rs
+
 
 analyseDependency :: Trace -> [UID] -> IO ()
 analyseDependency trc hs = loop hs 
@@ -695,6 +736,11 @@ judgeEventList frt = bool2jmt . (all isRight) . (map judgeME)
 data InfixOrPrefix = Infix | Prefix
 
 data Location = Trunk | ArgumentOf Location | ResultOf Location deriving Eq
+
+instance Show Location where 
+   show Trunk            = ""
+   show (ArgumentOf loc) = 'a' : show loc
+   show (ResultOf   loc) = 'r' : show loc
 
 data ArgOrRes = Arg | Res
 
@@ -798,11 +844,6 @@ holes frt r = map hole rs
         hole (ent,_) = let is = treeUIDs frt ent
                        in Hole [i | i <- [minimum is .. maximum is], i `notElem` js]
 
-data SubTree = SubTree Location [Event]
-
-constants :: EventForest -> Event -> SubTree
-constants frt r = undefined
-
 argEvents :: EventForest -> Event -> [[Event]]
 argEvents frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
   where pre :: Visit [[Event]]
@@ -823,15 +864,6 @@ resultEvents frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
                 [_,(Just ent)] -> if isConstantTree frt ent then (eventsInTree frt ent) : es else es
                 _              -> es
         pre _                     _ es = es
-
--- Is given event the root of a (sub)tree describing a constant value?
--- Note that root must be an EnterEvent.
-isConstantTree :: EventForest -> Event -> Bool
-isConstantTree frt ent = case ent of 
-  EnterEvent{} -> case head $ dfsChildren frt ent of
-    (Just ConstEvent{}) -> True
-    _                   -> False
-  _            -> False
 
 
 -- Given an event r, return depth first ordered list of events in the (sub)tree starting from r.
