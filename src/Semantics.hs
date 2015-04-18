@@ -9,6 +9,7 @@ import Data.Ord (comparing)
 import Test.QuickCheck
 import Data.Data hiding (Infix,Prefix)
 import Data.Generics.Schemes(listify)
+import Data.Maybe(mapMaybe)
 
 --------------------------------------------------------------------------------
 -- Expressions
@@ -175,6 +176,7 @@ ex4 = {- import -} prelude
 -- Example 5: 
 --      a) f -> g -> h
 --      b) f -> g, f -> h
+--      c) a -> b, a -> c, c -> d
 ex5a :: Expr
 ex5a = Let ("h", Observe "h" Right $ Lambda "y" $ Var "y")
      $ Let ("g", Observe "g" Right $ Lambda "y" $ Apply (Var "h") "y")
@@ -196,6 +198,20 @@ ex5b = Let ("h", Observe "h" Right (Lambda "y" $ Var "y"))
 
 traceEx5b :: Trace
 traceEx5b = reverse . snd . evaluate $ ex5b
+
+ex5c :: Expr
+ex5c = Let ("mod2",    Observe "mod2"    Right (Lambda "x" $ Var "x"))
+     $ Let ("isEven",  Observe "isEven"  Right (Lambda "x" $ Apply (Var "mod2") "x"))
+     $ Let ("plusOne", Observe "plusOne" Right (Lambda "x" $ Var "x"))
+     $ Let ("isOdd",   Observe "isOdd"   Right (Lambda "x" $ Let ("y", Apply (Var "plusOne") "x")
+                                                                 (Apply (Var "isEven") "y")
+                                               ))
+     $ Let ("k", c_1 [])
+     $ Print $ Apply (Var "isOdd") "k"
+
+
+traceEx5c :: Trace
+traceEx5c = reverse . snd . evaluate $ ex5c
 
 -- Example 6:
 --  There are different computation trees that are sound for algorithmic
@@ -233,6 +249,42 @@ ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
 
 traceEx7b :: Trace
 traceEx7b = reverse . snd . evaluate $ ex7b
+
+-- Example 8:
+-- Tracing constants is a well known issue (Nilsson). However, constants that are not
+-- traced should not cause problems. In this example we test applying two traced 
+-- functions "g" and "h" to the result of one other traced function "f".
+-- How does re-use of the result of "f" affect our dependence inference?
+ex8 :: Expr
+ex8 = genId "f"
+    $ genId "g"
+    $ genId "h"
+    -- p a1 a2 = case a1 of False -> (case a2 of False -> False)
+    $ Let ("p", Lambda "a1" $ Lambda "a2" 
+              $ Apply (Apply (Observe "p" Right
+              $ Lambda "b1" $ Lambda "b2" 
+              $ Case (Var "b1") [(c_0 [], Case (Var "b2") [(c_0 [], c_0 [])])]
+              ) "a1") "a2")
+    -- m a = let k = f a in p (g k) (h k) 
+    $ Let ("m", Lambda "a" (Apply (Observe "m" Right
+          $ Lambda "b"
+          $ Let ("k",  Apply (Var "f") "b")
+          $ Let ("k_g", Apply (Var "g") "k")
+          $ Let ("k_h", Apply (Var "h") "k")
+          $ Apply (Apply (Var "p") "k_g") "k_h"
+          ) "a"))
+    -- main = m False
+    $ Let ("c", c_0 []) $ Apply (Var "m") "c"
+
+  where genId :: String -> Expr -> Expr
+        genId funName = Let (funName, Lambda "x"
+                                    $ Apply 
+                                    ( Observe funName Right
+                                    $ Lambda "y" (Var "y")
+                                    ) "x")
+                                                        
+traceEx8 :: Trace
+traceEx8 = reverse . snd . evaluate $ ex8
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -587,6 +639,8 @@ doTrace rec = do
 data ConstantValue = ConstantValue { valStmt :: UID, valLoc :: Location
                                    , valMin :: UID,  valMax :: UID }
 
+type DDDG = Graph ConstantValue ()
+
 instance Show ConstantValue where
   show v = "Stmt-" ++ (show . valStmt $ v)
          ++ "-"    ++ (show . valLoc  $ v) 
@@ -605,6 +659,24 @@ constants frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
         mkConstantValue e loc = let us = treeUIDs frt e
                           in ConstantValue (eventUID r) loc (minimum us) (maximum us)
 
+mkDDDG :: [ConstantValue] -> DDDG
+mkDDDG vs = Graph (head vs) vs (mapMaybe (maybeDepends vs) vs)
+
+maybeDepends :: [ConstantValue] -> ConstantValue -> Maybe (Arc ConstantValue ())
+maybeDepends vs v = do
+  w <- closestEnclosing v vs
+  return $ Arc w v ()
+
+encloses :: ConstantValue -> ConstantValue -> Bool
+encloses v w = valMin v < valMin w && valMax v > valMax w
+
+closestEnclosing :: ConstantValue -> [ConstantValue] -> Maybe ConstantValue
+closestEnclosing v vs = case filter (flip encloses $ v) vs of
+  [] -> Nothing
+  ws -> Just . head . sortBy (comparing minMaxDiff) $ ws
+
+minMaxDiff :: ConstantValue -> Int
+minMaxDiff v = (valMax v) - (valMin v)
 
 -- Is given event the root of a (sub)tree describing a constant value?
 -- Note that root must be an EnterEvent.
@@ -623,7 +695,8 @@ analyseTrace trc = do
   let rs   = filter isRoot trc
       frt  = mkEventForest trc
       cs   = map (mkStmt frt) rs
-      vs   = reverse . sortBy (comparing valMax) . foldl (\z r -> z ++ constants frt r) [] $ rs
+      -- vs= reverse . sortBy (comparing valMax) . foldl (\z r -> z ++ constants frt r) [] $ rs
+      vs   =           sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] $ rs
   putStrLn $ "Trace has " ++ (show . length $ trc) ++ " events."
   putStrLn $ "Trace has " ++ (show . length $ rs)  ++ " root events: " ++ (commaList . (map eventUID) $ rs)
   -- print statement representations
@@ -631,6 +704,10 @@ analyseTrace trc = do
   -- print constants
   putStrLn "Constants:"
   mapM_ print vs
+  -- dataflow graph
+  putStrLn "Data dependencies:"
+  let (Graph _ _ dds) = mkDDDG vs
+  mapM_ (\dd -> putStrLn $ show (source dd) ++ " -> " ++ show (target dd)) dds
 
   -- -- print lists of UIDs of the subtrees that describe the constant results
   -- mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " result events: " ++ (commaList . (map $ map eventUID) $ resultEvents frt r)) rs
