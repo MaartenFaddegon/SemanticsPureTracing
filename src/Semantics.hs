@@ -227,6 +227,9 @@ ex6 = Let ("not",  Observe "not"  Wrong (Lambda "b" $ Case (Var "b") [(c_1 [], c
     $ Let ("y",    c_1 [])
     $ {-in-} Apply (Var "main") "y"
 
+-- ex7a:
+--   app f x = f (not x)
+--   main = app not True
 ex7a :: Expr
 ex7a = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
      $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "not") "x") 
@@ -238,6 +241,9 @@ ex7a = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
 traceEx7a :: Trace
 traceEx7a = reverse . snd . evaluate $ ex7a
 
+-- ex7b:
+--   app f x = not (f x)
+--   main = app not True
 ex7b :: Expr
 ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
      $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "f") "x") 
@@ -249,6 +255,24 @@ ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
 
 traceEx7b :: Trace
 traceEx7b = reverse . snd . evaluate $ ex7b
+
+-- ex7c:
+--   app f x = f x
+--   main = app (app not) True
+ex7c :: Expr
+ex7c = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
+     $ Let ("app", Lambda "g" $ Lambda "y" $ Apply (Apply
+                   (Observe "app"  Right (Lambda "f" $ Lambda "x" $ Apply (Var "f") "x"))
+                   "g" ) "y"
+           )
+     $ Let ("main", Observe "main" Right (Lambda "x" $ Let ("app1", Apply (Var "app") "not") 
+                                                $ Apply (Apply (Var "app") "app1") "x"))
+     $ Let ("y",    c_1 [])
+     $ {-in-} Apply (Var "main") "y"
+
+
+traceEx7c :: Trace
+traceEx7c = reverse . snd . evaluate $ ex7c
 
 -- Example 8:
 -- Tracing constants is a well known issue (Nilsson). However, constants that are not
@@ -285,6 +309,36 @@ ex8 = genId "f"
                                                         
 traceEx8 :: Trace
 traceEx8 = reverse . snd . evaluate $ ex8
+
+-- ex8b is as ex8, but p is not observed
+ex8b :: Expr
+ex8b = genId "f"
+     $ genId "g"
+     $ genId "h"
+     -- p a1 a2 = case a1 of False -> (case a2 of False -> False)
+     $ Let ("p", Lambda "b1" $ Lambda "b2" 
+               $ Case (Var "b1") [(c_0 [], Case (Var "b2") [(c_0 [], c_0 [])])]
+               )
+     -- m a = let k = f a in p (g k) (h k) 
+     $ Let ("m", Lambda "a" (Apply (Observe "m" Right
+           $ Lambda "b"
+           $ Let ("k",  Apply (Var "f") "b")
+           $ Let ("k_g", Apply (Var "g") "k")
+           $ Let ("k_h", Apply (Var "h") "k")
+           $ Apply (Apply (Var "p") "k_g") "k_h"
+           ) "a"))
+     -- main = m False
+     $ Let ("c", c_0 []) $ Apply (Var "m") "c"
+
+  where genId :: String -> Expr -> Expr
+        genId funName = Let (funName, Lambda "x"
+                                    $ Apply 
+                                    ( Observe funName Right
+                                    $ Lambda "y" (Var "y")
+                                    ) "x")
+
+traceEx8b :: Trace
+traceEx8b = reverse . snd . evaluate $ ex8b
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
@@ -632,16 +686,19 @@ doTrace rec = do
   doLog $ "* " ++ show rec
   modify $ \cxt -> cxt{trace = rec : trace cxt}
 
-
 --------------------------------------------------------------------------------
--- Dataflow
+-- Constant Values 
 
 data ConstantValue = ConstantValue { valStmt :: UID, valLoc :: Location
                                    , valMin :: UID,  valMax :: UID }
+                   | CVRoot
+                  deriving Eq
 
-type DDDG = Graph ConstantValue ()
+type ConstantTree = Graph ConstantValue ()
+type CVArc = Arc ConstantValue ()
 
 instance Show ConstantValue where
+  show CVRoot = "Root"
   show v = "Stmt-" ++ (show . valStmt $ v)
          ++ "-"    ++ (show . valLoc  $ v) 
          ++ ": "   ++ (show . valMin  $ v) 
@@ -659,10 +716,28 @@ constants frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
         mkConstantValue e loc = let us = treeUIDs frt e
                           in ConstantValue (eventUID r) loc (minimum us) (maximum us)
 
-mkDDDG :: [ConstantValue] -> DDDG
-mkDDDG vs = Graph (head vs) vs (mapMaybe (maybeDepends vs) vs)
 
-maybeDepends :: [ConstantValue] -> ConstantValue -> Maybe (Arc ConstantValue ())
+-- Is given event the root of a (sub)tree describing a constant value?
+-- Note that root must be an EnterEvent.
+isConstantTree :: EventForest -> Event -> Bool
+isConstantTree frt ent = case ent of 
+  EnterEvent{} -> case head $ dfsChildren frt ent of
+    (Just ConstEvent{}) -> True
+    _                   -> False
+  _            -> False
+--------------------------------------------------------------------------------
+-- Dynamic Data Dependency Tree
+
+mkDDDT :: [ConstantValue] -> ConstantTree
+mkDDDT vs = Graph CVRoot (CVRoot : vs) (as ++ as')
+  where as  = mapMaybe (maybeDepends vs) vs
+        as' = map (\r -> Arc CVRoot r()) rs
+        rs  = filter (notEnclosed vs) vs
+
+notEnclosed :: [ConstantValue] -> ConstantValue -> Bool
+notEnclosed vs v = all (not . (flip encloses) v) vs
+
+maybeDepends :: [ConstantValue] -> ConstantValue -> Maybe (CVArc)
 maybeDepends vs v = do
   w <- closestEnclosing v vs
   return $ Arc w v ()
@@ -678,14 +753,56 @@ closestEnclosing v vs = case filter (flip encloses $ v) vs of
 minMaxDiff :: ConstantValue -> Int
 minMaxDiff v = (valMax v) - (valMin v)
 
--- Is given event the root of a (sub)tree describing a constant value?
--- Note that root must be an EnterEvent.
-isConstantTree :: EventForest -> Event -> Bool
-isConstantTree frt ent = case ent of 
-  EnterEvent{} -> case head $ dfsChildren frt ent of
-    (Just ConstEvent{}) -> True
-    _                   -> False
-  _            -> False
+--------------------------------------------------------------------------------
+-- Last Open Result Dependency Tree
+
+mkResDepTree :: ConstantTree -> ConstantTree
+mkResDepTree ddt = Graph (root ddt) 
+                         (filter resOrRoot $ vertices ddt) 
+                         (visit [CVRoot] (succs ddt $ root ddt) [])
+
+  where -- visit list of children
+        visit :: CVStack -> [ConstantValue] -> [CVArc] -> [CVArc]
+        visit cvs vs as = foldl (\as' v -> visit' cvs v as') as vs
+
+        -- visit one child
+        visit' :: CVStack -> ConstantValue -> [CVArc] -> [CVArc]
+        visit' cvs v as
+          | (isResult . valLoc) v = let as' = Arc (peekCVS cvs v) v () : as
+                                    in  visit (pushCVS cvs v) (succs ddt v) as'
+          | otherwise             =     visit (popCVS cvs)    (succs ddt v) as
+
+        resOrRoot :: ConstantValue -> Bool
+        resOrRoot CVRoot = True
+        resOrRoot v = isResult . valLoc $ v
+        
+        isResult :: Location -> Bool
+        isResult Trunk          = True
+        isResult (ResultOf l)   = isResult l
+        isResult (ArgumentOf _) = False
+
+
+
+type CVStack = [ConstantValue]
+
+pushCVS :: CVStack -> ConstantValue -> CVStack
+pushCVS cvs r = r : cvs
+
+popCVS :: CVStack -> CVStack
+popCVS []      = []
+popCVS (_:cvs) = cvs
+
+popMatchCVS :: CVStack -> ConstantValue -> CVStack
+popMatchCVS []      _ = error "Pop empty Constant Value Stack!"
+popMatchCVS (r:cvs) a = case (valLoc r, valLoc a) of 
+  (ResultOf rloc, ArgumentOf aloc) -> if rloc == aloc then cvs else err
+  _                                -> err
+  where err = error "Constant Value Stack mismatch on pop!"
+
+peekCVS :: CVStack -> ConstantValue -> ConstantValue
+peekCVS []     v = error $ (fst . shwCV) v ++ ": peek on empty Constant Value Stack!"
+peekCVS (cv:_) _ = cv
+
 
 --------------------------------------------------------------------------------
 -- Trace post processing
@@ -704,15 +821,11 @@ analyseTrace trc = do
   -- print constants
   putStrLn "Constants:"
   mapM_ print vs
-  -- dataflow graph
+  -- Dynamic data dependency tree
   putStrLn "Data dependencies:"
-  let (Graph _ _ dds) = mkDDDG vs
+  let (Graph _ _ dds) = mkDDDT vs
   mapM_ (\dd -> putStrLn $ show (source dd) ++ " -> " ++ show (target dd)) dds
 
-  -- -- print lists of UIDs of the subtrees that describe the constant results
-  -- mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " result events: " ++ (commaList . (map $ map eventUID) $ resultEvents frt r)) rs
-  -- -- print lists of UIDs of the subtrees that describe all arguments:
-  -- mapM_ (\r -> putStrLn $ "Stmt-" ++ (show . eventUID $ r) ++ " arguments: " ++ (commaList . (map $ map eventUID) $ argEvents frt r)) rs
 
 
 analyseDependency :: Trace -> [UID] -> IO ()
@@ -1064,6 +1177,25 @@ disp :: Expr -> IO ()
 disp = disp' (display shw)
   where shw :: CompGraph -> String
         shw g = showWith g showVertex showArc
+
+dispDataDep :: Expr -> IO ()
+dispDataDep e = display shwCT (evalDDT e)
+
+dispResDep :: Expr -> IO ()
+dispResDep e = display shwCT (mkResDepTree $ evalDDT e)
+
+evalDDT :: Expr -> ConstantTree
+evalDDT e = mkDDDT vs
+  where trc = snd . evaluate $ e
+        frt = mkEventForest trc
+        rs  = filter isRoot trc
+        vs  = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] $ rs
+
+shwCT :: ConstantTree -> String
+shwCT g = showWith g shwCV (\_ -> "")
+
+shwCV :: ConstantValue -> (String,String)
+shwCV v = (show (valLoc v) ++ "_" ++ show (valStmt v), "")
 
 showVertex :: Vertex -> (String,String)
 showVertex v = (showVertex' v, "")
