@@ -274,10 +274,8 @@ ex7c = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
 traceEx7c :: Trace
 traceEx7c = reverse . snd . evaluate $ ex7c
 
--- Example 8:
--- Tracing constants is a well known issue (Nilsson). However, constants that are not
--- traced should not cause problems. In this example we test applying two traced 
--- functions "g" and "h" to the result of one other traced function "f".
+-- Example 8: How does our technique handle sharing?
+
 -- How does re-use of the result of "f" affect our dependence inference?
 ex8 :: Expr
 ex8 = genId "f"
@@ -339,6 +337,35 @@ ex8b = genId "f"
 
 traceEx8b :: Trace
 traceEx8b = reverse . snd . evaluate $ ex8b
+
+-- Example 8c: sharing an argument
+--   f x = x
+--   g x = x
+--   m x = f x + g x
+
+ex8c :: Expr
+ex8c = genId "f"
+     $ genId "g"
+     -- p a1 a2 = case a1 of False -> (case a2 of False -> False)
+     $ Let ("p", Lambda "b1" $ Lambda "b2" 
+               $ Case (Var "b1") [(c_0 [], Case (Var "b2") [(c_0 [], c_0 [])])]
+               )
+     -- m a = let k_f = f a; k_g = g a in p k_f k_g
+     $ Let ("m", Lambda "a" (Apply (Observe "m" Right
+           $ Lambda "b"
+           $ Let ("k_g", Apply (Var "g") "b")
+           $ Let ("k_f", Apply (Var "f") "b")
+           $ Apply (Apply (Var "p") "k_f") "k_g"
+           ) "a"))
+     -- main = m False
+     $ Let ("c", c_0 []) $ Apply (Var "m") "c"
+
+  where genId :: String -> Expr -> Expr
+        genId funName = Let (funName, Lambda "x"
+                                    $ Apply 
+                                    ( Observe funName Right
+                                    $ Lambda "y" (Var "y")
+                                    ) "x")
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
