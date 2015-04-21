@@ -1,9 +1,76 @@
 module Examples where
+
+import Semantics
+import CompTree
+import DataDep
+import EventForest
+
 import Prelude hiding (Right)
 import Data.Graph.Libgraph
-import Semantics
+import Data.List(sortBy)
+import Data.Ord (comparing)
 
--- We will use the following constructor encoding in the examples:
+--------------------------------------------------------------------------------
+-- Evaluate and display.
+
+dispTxt :: Expr -> IO ()  
+dispTxt = disp' (putStrLn . shw)
+  where shw :: CompTree -> String
+        shw g = "\nComputation statements:\n" ++ unlines (map showVertex' $ vertices g)
+
+-- Requires Imagemagick to be installed.
+disp :: Expr -> IO ()
+disp = disp' (display shw)
+  where shw :: CompTree -> String
+        shw g = showWith g showVertex showArc
+
+dispDataDep :: Expr -> IO ()
+dispDataDep e = display shwCT (evalDDT e)
+
+dispResDep :: Expr -> IO ()
+dispResDep e = display shwCT (mkResDepTree $ evalDDT e)
+
+evalDDT :: Expr -> ConstantTree
+evalDDT e = mkDDDT (mkConstants trc)
+  where trc = snd . evaluate $ e
+        -- rs  = filter isRoot trc
+        -- vs  = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] $ rs
+
+mkConstants :: Trace -> [ConstantValue]
+mkConstants trc = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] 
+                $ filter isRoot trc
+        where frt = mkEventForest trc
+
+showVertex :: Vertex -> (String,String)
+showVertex v = (showVertex' v, "")
+
+showVertex' :: Vertex -> String
+showVertex' RootVertex  = "Root"
+showVertex' (Vertex c) = showCompStmt c
+
+showCompStmt :: CompStmt -> String
+showCompStmt (CompStmt _ i r j) = r
+        ++ "\n with UIDs "     ++ show i
+        ++ "\n with judgment " ++ show j
+
+showArc :: Arc Vertex () -> String
+showArc _ = ""
+
+disp' :: (CompTree -> IO a) -> Expr -> IO a
+disp' f expr = do
+  putStrLn (messages ++ strc)
+  f . mkCompTree (mkStmts trc) . mkResDepTree . mkDDDT . mkConstants $ trc
+  -- Uncomment the next line to write all reduction steps to file (for off-line analysis).
+  -- writeFile "log" (messages ++ strc)
+  where (reduct,trc,messages) = evaluate' expr
+        strc = "\n\nReduct: " ++ show reduct
+               ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
+
+
+--------------------------------------------------------------------------------
+-- Examples
+
+-- We use the following constructor encoding in the examples:
 c_0 :: [Name] -> Expr
 c_0 = Constr (ConstrId 0) -- False
 
