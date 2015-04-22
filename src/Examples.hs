@@ -2,6 +2,7 @@ module Examples where
 
 import Semantics
 import Run
+import FreeVar
 
 import Prelude hiding (Right)
 import Data.Graph.Libgraph
@@ -342,8 +343,8 @@ cex1 :: Expr
 cex1 = Case (Apply (Let ("d",Apply (Let ("h",Apply (Let ("h",c_3 ["h","i"] Right) (c_1 [] Right)) "b") (Observe "M" Wrong (Lambda "d" (Let ("e",c_3 ["b","b"] Right) (c_1 [] Right))))) "g") (Lambda "a" (Let ("h",Lambda "f" (Case (c_1 [] Right) [(c_0 [] Right,c_3 ["e","c"] Right),(c_1 [] Right,c_3 ["a","b"] Right),(c_2 [] Right,c_3 ["h","a"] Right),(c_3 ["e","f"] Right,c_3 ["g","f"] Right)])) (Var "d")))) "i") [(c_0 [] Right,Let ("g",c_1 [] Right) (c_3 ["e","g"] Right)),(c_1 [] Right,Apply (Observe "G" Right (Lambda "i" (Var "d"))) "e"),(c_2 [] Right,Lambda "c" (Let ("h",Lambda "h" (Let ("i",c_2 [] Right) (Observe "N" Right (Lambda "b" (c_3 ["b","i"] Right))))) (Var "g"))),(c_3 ["a","e"] Right,Observe "I" Right (Lambda "d" (Lambda "h" (Let ("e",Case (c_1 [] Right) [(c_0 [] Right,c_3 ["f","a"] Right),(c_1 [] Right,c_3 ["h","h"] Right),(c_2 [] Right,c_3 ["e","c"] Right),(c_3 ["c","e"] Right,c_3 ["a","i"] Right)]) (Let ("g",c_3 ["h","i"] Right) (Case (c_1 [] Right) [(c_0 [] Right,c_2 [] Right),(c_1 [] Right,c_3 ["f","a"] Right),(c_2 [] Right,c_2 [] Right),(c_3 ["b","c"] Right,c_0 [] Right)]))))))]
 
 -- A manual variation on cex1 where the problem is easier to spot:
-cex1' :: Expr
-cex1' = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fun
+cex1a :: Expr
+cex1a = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fun
       $ Let ("v", Let ("y", c_1 [] Right) (Apply (Var "f") "y")) -- free var v
       $ Let ("g", (Observe "g" Wrong (Lambda "x" (Var "v"))))    -- use of free var
       -- In the main function, we first force the evaluation of the free variable
@@ -353,6 +354,18 @@ cex1' = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fu
          -- while g itself is correct, it returns the wrong result due to contamination
          -- from the defective function f.
          [(c_1 [] Right, Let ("z", c_1 [] Right) (Apply (Var "g") "z"))]
+
+cex1b :: Expr
+cex1b = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fun
+      $ Let ("v", Let ("y", c_1 [] Right) (Apply (Var "f") "y")) -- free var v
+      $ Let ("g", (Observe "g" Wrong (Lambda "x" (Var "x"))))
+      -- In the main function, we first force the evaluation of the free variable
+      -- and thus add events of the defective function f to the trace.
+      $ Case (Var "v") 
+         -- After that we apply the function g to the free variable in the body,
+         -- this is not a problem because now we see that function g gets a wrong
+         -- value as argument.
+         [(c_1 [] Right, Apply (Var "g") "v")]
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
