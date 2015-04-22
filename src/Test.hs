@@ -1,11 +1,13 @@
 import Semantics
 import Examples
+import CompTree
 
 import Prelude hiding (Right)
 import Data.List(isPrefixOf,sort)
 import Test.QuickCheck
 import Control.Monad.State
 import Data.Graph.Libgraph
+import Data.Generics.Schemes(listify)
 
 --------------------------------------------------------------------------------
 -- QuickCheck soundness property
@@ -123,18 +125,18 @@ main = quickCheckWith args prop_actuallyFaulty
 --------------------------------------------------------------------------------
 -- Finding faulty program slices
 
+-- Evaluate, and apply algorithmic debugging to resulting trace to obtain a list
+-- of faulty labels.
 algoDebug :: Expr -> [Label]
-algoDebug = undefined
+algoDebug expr = map getLbl . findFaulty_dag getJmt $ ct
 
-markedFaulty :: Expr -> [Label]
-markedFaulty = undefined
+  where (_,_,_,ct) = red expr
 
-{-
--- Evaluate, and use algorithmic debugging on result
-algoDebug :: Expr -> [Label]
-algoDebug = map getLbl . findFaulty_dag j . snd . mkGraph . mkStmts . evaluate
-  where j RootVertex = Right
-        j (Vertex c) = stmtJudgement c
+        getJmt :: Vertex -> Judgement
+        getJmt RootVertex = Right
+        getJmt (Vertex c) = stmtJudgement c
+
+        getLbl :: Vertex -> Label
         getLbl (Vertex c) = stmtLabel c
         getLbl RootVertex = error "Algorithmic debugging marked root as faulty!"
 
@@ -154,6 +156,3 @@ markedFaulty = map getLabel . listify isMarked
         -- addF :: [Label] -> Expr -> [Label]
         -- addF ls (Observe l Wrong _) = l : ls
         -- addF ls _                   = ls
-
-
--}

@@ -13,33 +13,41 @@ import Data.Ord (comparing)
 --------------------------------------------------------------------------------
 -- Evaluate and display.
 
-dispTxt :: Expr -> IO ()  
-dispTxt = disp' (putStrLn . shw)
-  where shw :: CompTree -> String
-        shw g = "\nComputation statements:\n" ++ unlines (map showVertex' $ vertices g)
-
--- Requires Imagemagick to be installed.
-disp :: Expr -> IO ()
-disp = disp' (display shw)
-  where shw :: CompTree -> String
-        shw g = showWith g showVertex showArc
-
-dispDataDep :: Expr -> IO ()
-dispDataDep e = display shwCT (evalDDT e)
-
-dispResDep :: Expr -> IO ()
-dispResDep e = display shwCT (mkResDepTree $ evalDDT e)
-
-evalDDT :: Expr -> ConstantTree
-evalDDT e = mkDDDT (mkConstants trc)
-  where trc = snd . evaluate $ e
-        -- rs  = filter isRoot trc
-        -- vs  = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] $ rs
+red :: Expr -> (String, ConstantTree, ConstantTree, CompTree)
+red expr = (str, ddt, rdt, ct)
+  where (reduct,trc,messages) = evaluate' expr
+        str = messages 
+            ++ "\n\nReduct: " ++ show reduct
+            ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
+        ddt = mkDDDT (mkConstants trc)
+        rdt = mkResDepTree ddt
+        ct  = mkCompTree (mkStmts trc) rdt
 
 mkConstants :: Trace -> [ConstantValue]
 mkConstants trc = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] 
                 $ filter isRoot trc
         where frt = mkEventForest trc
+
+dispTxt :: Expr -> IO ()  
+dispTxt expr = putStrLn . shw $ ct
+  where shw :: CompTree -> String
+        shw g = "\nComputation statements:\n" ++ unlines (map showVertex' $ vertices g)
+        (_,_,_,ct) = red expr
+
+-- Requires Imagemagick to be installed.
+dispCompTree :: Expr -> IO ()
+dispCompTree expr = (display shw) ct
+  where shw :: CompTree -> String
+        shw g = showWith g showVertex showArc
+        (_,_,_,ct) = red expr
+
+dispDataDep :: Expr -> IO ()
+dispDataDep expr = display shwCT ddt
+  where (_,ddt,_,_) = red expr
+
+dispResDep :: Expr -> IO ()
+dispResDep expr = display shwCT rdt
+  where (_,_,rdt,_) = red expr
 
 showVertex :: Vertex -> (String,String)
 showVertex v = (showVertex' v, "")
@@ -55,17 +63,6 @@ showCompStmt (CompStmt _ i r j) = r
 
 showArc :: Arc Vertex () -> String
 showArc _ = ""
-
-disp' :: (CompTree -> IO a) -> Expr -> IO a
-disp' f expr = do
-  putStrLn (messages ++ strc)
-  f . mkCompTree (mkStmts trc) . mkResDepTree . mkDDDT . mkConstants $ trc
-  -- Uncomment the next line to write all reduction steps to file (for off-line analysis).
-  -- writeFile "log" (messages ++ strc)
-  where (reduct,trc,messages) = evaluate' expr
-        strc = "\n\nReduct: " ++ show reduct
-               ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
-
 
 --------------------------------------------------------------------------------
 -- Examples
