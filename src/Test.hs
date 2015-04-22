@@ -97,7 +97,7 @@ main :: IO ()
 main = quickCheckWith args prop_actuallyFaulty
   where args = Args { replay          = Nothing
                     , maxSuccess      = 10000  -- number of tests
-                    , maxDiscardRatio = 100
-                    , maxSize         = 100   -- max subexpressions
+                    , maxDiscardRatio = 500    -- many random exprs will not be valid
+                    , maxSize         = 100    -- max subexpressions
                     , chatty          = True
                     }
