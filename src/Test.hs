@@ -1,6 +1,7 @@
 import Semantics
 import Examples
 import Run
+import FreeVar
 
 import Prelude hiding (Right)
 import Data.Graph.Libgraph
@@ -19,8 +20,11 @@ nonEmptyTrace = not . null . getTrace
 reducesToConstr :: Reduct -> Bool
 reducesToConstr r = case getReduct r of (Constr _ _ _) -> True; _ -> False
 
+hasNoFreeVars :: Expr -> Bool
+hasNoFreeVars expr = freeVars expr == NoFreeVar
+
 validExpr :: Expr -> Bool
-validExpr expr = reducesToConstr r && nonEmptyTrace r
+validExpr expr = hasNoFreeVars expr && reducesToConstr r && nonEmptyTrace r
   where r = red expr
 
 prop_actuallyFaulty :: Expr -> Property
