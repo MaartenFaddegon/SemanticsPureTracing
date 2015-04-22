@@ -16,7 +16,7 @@ import Data.Ord (comparing)
 algoDebug :: Expr -> [Label]
 algoDebug expr = map getLbl . findFaulty_dag getJmt $ ct
 
-  where (_,_,_,ct) = red expr
+  where ct = getCompTree . red $ expr
 
         getJmt :: Vertex -> Judgement
         getJmt RootVertex = Right
@@ -46,8 +46,16 @@ markedFaulty = map getLabel . listify isMarked
 --------------------------------------------------------------------------------
 -- Evaluate and display.
 
-red :: Expr -> (String, ConstantTree, ConstantTree, CompTree)
-red expr = (str, ddt, rdt, ct)
+data Reduct = Reduct { getReduct      :: Expr
+                     , getLog         :: String
+                     , getTrace       :: Trace
+                     , getDataDepTree :: ConstantTree
+                     , getResDepTree  :: ConstantTree
+                     , getCompTree    :: CompTree
+                     }
+
+red :: Expr -> Reduct
+red expr = Reduct reduct str trc ddt rdt ct
   where (reduct,trc,messages) = evaluate' expr
         str = messages 
             ++ "\n\nReduct: " ++ show reduct
@@ -62,25 +70,22 @@ mkConstants trc = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt 
         where frt = mkEventForest trc
 
 dispTxt :: Expr -> IO ()  
-dispTxt expr = putStrLn $ str ++ shw ct
+dispTxt expr = putStrLn $ getLog r ++ shw (getCompTree r)
   where shw :: CompTree -> String
         shw g = "\nComputation statements:\n" ++ unlines (map showVertex' $ vertices g)
-        (str,_,_,ct) = red expr
+        r = red expr
 
 -- Requires Imagemagick to be installed.
 dispCompTree :: Expr -> IO ()
-dispCompTree expr = (display shw) ct
+dispCompTree expr = (display shw) (getCompTree . red $ expr)
   where shw :: CompTree -> String
         shw g = showWith g showVertex showArc
-        (_,_,_,ct) = red expr
 
 dispDataDep :: Expr -> IO ()
-dispDataDep expr = display shwCT ddt
-  where (_,ddt,_,_) = red expr
+dispDataDep expr = display shwCT (getDataDepTree . red $ expr)
 
 dispResDep :: Expr -> IO ()
-dispResDep expr = display shwCT rdt
-  where (_,_,rdt,_) = red expr
+dispResDep expr = display shwCT (getResDepTree . red $ expr)
 
 showVertex :: Vertex -> (String,String)
 showVertex v = (showVertex' v, "")

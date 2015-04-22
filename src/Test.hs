@@ -13,11 +13,18 @@ import Control.Monad.State
 subsetOf :: Ord a => [a] -> [a] -> Bool
 subsetOf xs ys = all (flip elem ys) xs
 
-nonEmptyTrace :: Expr -> Bool
-nonEmptyTrace = not . null . snd . evaluate
+nonEmptyTrace :: Reduct -> Bool
+nonEmptyTrace = not . null . getTrace
+
+reducesToConstr :: Reduct -> Bool
+reducesToConstr r = case getReduct r of (Constr _ _ _) -> True; _ -> False
+
+validExpr :: Expr -> Bool
+validExpr expr = reducesToConstr r && nonEmptyTrace r
+  where r = red expr
 
 prop_actuallyFaulty :: Expr -> Property
-prop_actuallyFaulty e = nonEmptyTrace e ==> property $ algoDebug e `subsetOf` markedFaulty e
+prop_actuallyFaulty e = validExpr e ==> property $ algoDebug e `subsetOf` markedFaulty e
 
 --------------------------------------------------------------------------------
 -- Generating random expressions with observed abstractions
