@@ -1,19 +1,17 @@
 import Semantics
 import Examples
-import CompTree
+import Run
 
 import Prelude hiding (Right)
-import Data.List(isPrefixOf,sort)
+import Data.Graph.Libgraph
 import Test.QuickCheck
 import Control.Monad.State
-import Data.Graph.Libgraph
-import Data.Generics.Schemes(listify)
 
 --------------------------------------------------------------------------------
 -- QuickCheck soundness property
 
 subsetOf :: Ord a => [a] -> [a] -> Bool
-subsetOf xs ys = isPrefixOf (sort xs) (sort ys)
+subsetOf xs ys = all (flip elem ys) xs
 
 nonEmptyTrace :: Expr -> Bool
 nonEmptyTrace = not . null . snd . evaluate
@@ -92,38 +90,3 @@ main = quickCheckWith args prop_actuallyFaulty
                     , maxSize         = 100   -- max subexpressions
                     , chatty          = True
                     }
-
---------------------------------------------------------------------------------
--- Finding faulty program slices
-
--- Evaluate, and apply algorithmic debugging to resulting trace to obtain a list
--- of faulty labels.
-algoDebug :: Expr -> [Label]
-algoDebug expr = map getLbl . findFaulty_dag getJmt $ ct
-
-  where (_,_,_,ct) = red expr
-
-        getJmt :: Vertex -> Judgement
-        getJmt RootVertex = Right
-        getJmt (Vertex c) = stmtJudgement c
-
-        getLbl :: Vertex -> Label
-        getLbl (Vertex c) = stmtLabel c
-        getLbl RootVertex = error "Algorithmic debugging marked root as faulty!"
-
--- Extract program slices we marked as faulty
-markedFaulty :: Expr -> [Label]
-markedFaulty = map getLabel . listify isMarked
-
-  where isMarked :: Expr -> Bool
-        isMarked (Observe _ Wrong _) = True
-        isMarked _                   = False
-
-        getLabel :: Expr -> Label
-        getLabel (Observe l Wrong _) = l
-        getLabel _                   = "Filtered wrong Expr in markedFaulty!"
- 
-        -- MF TODO: rather than map over listify results do something with gfoldl here?
-        -- addF :: [Label] -> Expr -> [Label]
-        -- addF ls (Observe l Wrong _) = l : ls
-        -- addF ls _                   = ls

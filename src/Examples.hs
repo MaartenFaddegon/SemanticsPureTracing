@@ -1,68 +1,10 @@
 module Examples where
 
 import Semantics
-import CompTree
-import DataDep
-import EventForest
+import Run
 
 import Prelude hiding (Right)
 import Data.Graph.Libgraph
-import Data.List(sortBy)
-import Data.Ord (comparing)
-
---------------------------------------------------------------------------------
--- Evaluate and display.
-
-red :: Expr -> (String, ConstantTree, ConstantTree, CompTree)
-red expr = (str, ddt, rdt, ct)
-  where (reduct,trc,messages) = evaluate' expr
-        str = messages 
-            ++ "\n\nReduct: " ++ show reduct
-            ++ foldl (\acc s -> acc ++ "\n" ++ s) "\n\nEvent trace:" (map show $ reverse trc)
-        ddt = mkDDDT (mkConstants trc)
-        rdt = mkResDepTree ddt
-        ct  = mkCompTree (mkStmts trc) rdt
-
-mkConstants :: Trace -> [ConstantValue]
-mkConstants trc = sortBy (comparing valMin) . foldl (\z r -> z ++ constants frt r) [] 
-                $ filter isRoot trc
-        where frt = mkEventForest trc
-
-dispTxt :: Expr -> IO ()  
-dispTxt expr = putStrLn . shw $ ct
-  where shw :: CompTree -> String
-        shw g = "\nComputation statements:\n" ++ unlines (map showVertex' $ vertices g)
-        (_,_,_,ct) = red expr
-
--- Requires Imagemagick to be installed.
-dispCompTree :: Expr -> IO ()
-dispCompTree expr = (display shw) ct
-  where shw :: CompTree -> String
-        shw g = showWith g showVertex showArc
-        (_,_,_,ct) = red expr
-
-dispDataDep :: Expr -> IO ()
-dispDataDep expr = display shwCT ddt
-  where (_,ddt,_,_) = red expr
-
-dispResDep :: Expr -> IO ()
-dispResDep expr = display shwCT rdt
-  where (_,_,rdt,_) = red expr
-
-showVertex :: Vertex -> (String,String)
-showVertex v = (showVertex' v, "")
-
-showVertex' :: Vertex -> String
-showVertex' RootVertex  = "Root"
-showVertex' (Vertex c) = showCompStmt c
-
-showCompStmt :: CompStmt -> String
-showCompStmt (CompStmt _ i r j) = r
-        ++ "\n with UIDs "     ++ show i
-        ++ "\n with judgment " ++ show j
-
-showArc :: Arc Vertex () -> String
-showArc _ = ""
 
 --------------------------------------------------------------------------------
 -- Examples
