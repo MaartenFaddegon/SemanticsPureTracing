@@ -71,16 +71,16 @@ disp' f expr = do
 -- Examples
 
 -- We use the following constructor encoding in the examples:
-c_0 :: [Name] -> Expr
+c_0 :: [Name] -> Judgement -> Expr
 c_0 = Constr (ConstrId 0) -- False
 
-c_1 :: [Name] -> Expr
+c_1 :: [Name] -> Judgement -> Expr
 c_1 = Constr (ConstrId 1) -- True
 
-c_2 :: [Name] -> Expr
+c_2 :: [Name] -> Judgement -> Expr
 c_2 = Constr (ConstrId 2) -- the empty list []
 
-c_3 :: [Name] -> Expr
+c_3 :: [Name] -> Judgement -> Expr
 c_3 = Constr (ConstrId 3) -- the list constructor (:)
 
 
@@ -102,15 +102,15 @@ mapTraced = Let ("mapT", Lambda "f" $ Lambda "xs"
 -- n :: B -> B
 myNot :: Expr -> Expr
 myNot     = Let ("n", Lambda "b" $ Case (Var "b")
-                    [ (c_1 [], c_0 [])
-                    , (c_0 [], c_1 [])
+                    [ (c_1 [] Right, c_0 [] Right)
+                    , (c_0 [] Right, c_1 [] Right)
                     ])
 
 notTraced :: Expr -> Expr
 notTraced = Let ("n", Lambda "b'" $ Apply (Observe "n" Right $ Lambda "b"
                       $ Case (Var "b")
-                             [ (c_1 [], c_0 [])
-                             , (c_0 [], c_1 [])
+                             [ (c_1 [] Right, c_0 [] Right)
+                             , (c_0 [] Right, c_1 [] Right)
                              ]) "b'")
 
 
@@ -118,10 +118,10 @@ notTraced = Let ("n", Lambda "b'" $ Apply (Observe "n" Right $ Lambda "b"
 myXor :: Expr -> Expr
 myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Observe "x" Right $ Lambda "b1" $ Lambda "b2"
                       $ Case (Var "b1")
-                             [ (c_1 [], Case (Var "b2")[ (c_1 [], c_0 [])
-                                                              , (c_0 [], c_1 [])])
-                             , (c_0 [], Case (Var "b2")[ (c_1 [], c_1 [])
-                                                              , (c_0 [], c_1 [])])
+                             [ (c_1 [] Right, Case (Var "b2")[ (c_1 [] Right, c_0 [] Right)
+                                                             , (c_0 [] Right, c_1 [] Right)])
+                             , (c_0 [] Right, Case (Var "b2")[ (c_1 [] Right, c_1 [] Right)
+                                                             , (c_0 [] Right, c_1 [] Right)])
                              ]
                              ) "a1") "a2")
 
@@ -129,7 +129,7 @@ myXor = Let ("x", Lambda "a1" $ Lambda "a2" $ Apply (Apply (Observe "x" Right $ 
 ex1 :: Expr
 ex1 = {- import -} prelude
     $ {- import -} notTraced
-    $ Let ("b", (c_0 []))
+    $ Let ("b", (c_0 [] Right))
     $ Print $ Apply (Var "n") "b"
 
 -- Example 2: Function h and n are traced, h maps over a list and n is
@@ -140,22 +140,22 @@ ex1 = {- import -} prelude
 ex2a :: Expr
 ex2a = {- import -} prelude
      $ {- import -} notTraced
-     $ Let ("xs", Let ("a", c_1 [])
-                $ Let ("b", c_0 [])
-                $ Let ("c2", c_2 [])
-                $ Let ("c1", c_3 ["b", "c2"])
-                $            c_3 ["a","c1"])
+     $ Let ("xs", Let ("a", c_1 [] Right)
+                $ Let ("b", c_0 [] Right)
+                $ Let ("c2", c_2 [] Right)
+                $ Let ("c1", c_3 ["b", "c2"] Right)
+                $            c_3 ["a","c1"] Right)
      $ Let ("h", Lambda "xs" (Apply (Observe "h" Right (Apply (Var "map") "n")) "xs"))
      $ Print $ Apply (Var "h") "xs"
 
 ex2b :: Expr
 ex2b = {- import -} prelude
      $ {- import -} notTraced
-     $ Let ("xs", Let ("a", c_1 [])
-                $ Let ("b", c_0 [])
-                $ Let ("c2", c_2 [])
-                $ Let ("c1", c_3 ["b", "c2"])
-                $            c_3 ["a","c1"])
+     $ Let ("xs", Let ("a", c_1 [] Right)
+                $ Let ("b", c_0 [] Right)
+                $ Let ("c2", c_2 [] Right)
+                $ Let ("c1", c_3 ["b", "c2"] Right)
+                $            c_3 ["a","c1"] Right)
      $ Let ("h", Lambda "xs" (Apply (Observe "h" Right (Apply (Var "map") "n")) "xs"))
      $ Print $ Let ("ys", Apply (Var "h") "xs") 
              $ Apply (Var "reverse") "ys"
@@ -166,11 +166,11 @@ ex3a :: Expr
 ex3a = {- import -} prelude
      $ {- import -} myNot
      $ {- import -} mapTraced
-     $ Let ("xs", Let ("a", c_1 [])
-                $ Let ("b", c_0 [])
-                $ Let ("c2", c_2 [])
-                $ Let ("c1", c_3 ["b", "c2"])
-                $            c_3 ["a","c1"])
+     $ Let ("xs", Let ("a", c_1 [] Right)
+                $ Let ("b", c_0 [] Right)
+                $ Let ("c2", c_2 [] Right)
+                $ Let ("c1", c_3 ["b", "c2"] Right)
+                $            c_3 ["a","c1"] Right)
      $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
              $ Var "ys"
 
@@ -178,11 +178,11 @@ ex3b :: Expr
 ex3b = {- import -} prelude
      $ {- import -} notTraced
      $ {- import -} mapTraced
-     $ Let ("xs", Let ("a", c_1 [])
-                $ Let ("b", c_0 [])
-                $ Let ("c2", c_2 [])
-                $ Let ("c1", c_3 ["b", "c2"])
-                $            c_3 ["a","c1"])
+     $ Let ("xs", Let ("a", c_1 [] Right)
+                $ Let ("b", c_0 [] Right)
+                $ Let ("c2", c_2 [] Right)
+                $ Let ("c1", c_3 ["b", "c2"] Right)
+                $            c_3 ["a","c1"] Right)
      $ Print $ Let ("ys", Apply (Apply (Var "mapT") "n") "xs")
              $ Apply (Var "reverse") "ys"
 
@@ -191,23 +191,23 @@ ex4 :: Expr
 ex4 = {- import -} prelude
     $ {- import -} foldlTraced
     $ {- import -} myXor
-     $ Let ("bs", Let ("a", c_1 [])
-                $ Let ("b", c_0 [])
-                $ Let ("c2", c_2 [])
-                $ Let ("c1", c_3 ["b", "c2"])
-                $            c_3 ["a","c1"])
-     $ Let ("z", c_0 [])
-     $ Print $ Apply (Apply (Apply (Var "foldlT") "x") "z") "bs"
+    $ Let ("bs", Let ("a", c_1 [] Right)
+               $ Let ("b", c_0 [] Right)
+               $ Let ("c2", c_2 [] Right)
+               $ Let ("c1", c_3 ["b", "c2"] Right)
+               $            c_3 ["a","c1"] Right)
+    $ Let ("z", c_0 [] Right)
+    $ Print $ Apply (Apply (Apply (Var "foldlT") "x") "z") "bs"
 
 -- Example 5: 
 --      a) f -> g -> h
 --      b) f -> g, f -> h
 --      c) a -> b, a -> c, c -> d
 ex5a :: Expr
-ex5a = Let ("h", Observe "h" Right $ Lambda "y" $ Var "y")
+ex5a = Let ("h", Observe "h" Wrong $ Lambda "y" $ Var "y")
      $ Let ("g", Observe "g" Right $ Lambda "y" $ Apply (Var "h") "y")
      $ Let ("f", Observe "f" Right $ Lambda "y" $ Apply (Var "g") "y")
-     $ Let ("k", c_1 [])
+     $ Let ("k", c_1 [] Right)
      $ Print $ Apply (Var "f") "k"
 
 traceEx5a :: Trace
@@ -219,7 +219,7 @@ ex5b = Let ("h", Observe "h" Right (Lambda "y" $ Var "y"))
      $ Let ("f", Observe "f" Right (Lambda "y" $ Let ("z", Apply (Var "g") "y")
                                                                (Apply (Var "h") "z")
                                              ))
-     $ Let ("k", c_1 [])
+     $ Let ("k", c_1 [] Right)
      $ Print $ Apply (Var "f") "k"
 
 traceEx5b :: Trace
@@ -232,7 +232,7 @@ ex5c = Let ("mod2",    Observe "mod2"    Right (Lambda "x" $ Var "x"))
      $ Let ("isOdd",   Observe "isOdd"   Right (Lambda "x" $ Let ("y", Apply (Var "plusOne") "x")
                                                                  (Apply (Var "isEven") "y")
                                                ))
-     $ Let ("k", c_1 [])
+     $ Let ("k", c_1 [] Right)
      $ Print $ Apply (Var "isOdd") "k"
 
 
@@ -247,21 +247,23 @@ traceEx5c = reverse . snd . evaluate $ ex5c
 --  create the dependencies that fit that.
 
 ex6 :: Expr
-ex6 = Let ("not",  Observe "not"  Wrong (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])]))
+ex6 = Let ("not",  Observe "not"  Wrong (Lambda "b" $ Case (Var "b") 
+                   [(c_1 [] Right, c_0 [] Right), (c_0 [] Right, c_1 [] Right)]))
     $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Apply (Var "f") "x"))
     $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
-    $ Let ("y",    c_1 [])
+    $ Let ("y",    c_1 [] Right)
     $ {-in-} Apply (Var "main") "y"
 
 -- ex7a:
 --   app f x = f (not x)
 --   main = app not True
 ex7a :: Expr
-ex7a = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
+ex7a = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right 
+                    (Lambda "b" $ Case (Var "b") [(c_1 [] Right, c_0 [] Right), (c_0 [] Right, c_1 [] Right)])) "a")
      $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "not") "x") 
                                                                   $ Apply (Var "f") "y"))
      $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
-     $ Let ("y",    c_1 [])
+     $ Let ("y",    c_1 [] Right)
      $ {-in-} Apply (Var "main") "y"
 
 traceEx7a :: Trace
@@ -271,11 +273,11 @@ traceEx7a = reverse . snd . evaluate $ ex7a
 --   app f x = not (f x)
 --   main = app not True
 ex7b :: Expr
-ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
+ex7b = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [] Right, c_0 [] Right), (c_0 [] Right, c_1 [] Right)])) "a")
      $ Let ("app",  Observe "app"  Right (Lambda "f" $ Lambda "x" $ Let ("y",Apply (Var "f") "x") 
                                                                   $ Apply (Var "not") "y"))
      $ Let ("main", Observe "main" Right (Lambda "x" $ Apply (Apply (Var "app") "not") "x"))
-     $ Let ("y",    c_1 [])
+     $ Let ("y",    c_1 [] Right)
      $ {-in-} Apply (Var "main") "y"
 
 
@@ -286,14 +288,14 @@ traceEx7b = reverse . snd . evaluate $ ex7b
 --   app f x = f x
 --   main = app (app not) True
 ex7c :: Expr
-ex7c = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [], c_0 []), (c_0 [], c_1 [])])) "a")
+ex7c = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case (Var "b") [(c_1 [] Right, c_0 [] Right), (c_0 [] Right, c_1 [] Right)])) "a")
      $ Let ("app", Lambda "g" $ Lambda "y" $ Apply (Apply
                    (Observe "app"  Right (Lambda "f" $ Lambda "x" $ Apply (Var "f") "x"))
                    "g" ) "y"
            )
      $ Let ("main", Observe "main" Right (Lambda "x" $ Let ("app1", Apply (Var "app") "not") 
                                                 $ Apply (Apply (Var "app") "app1") "x"))
-     $ Let ("y",    c_1 [])
+     $ Let ("y",    c_1 [] Right)
      $ {-in-} Apply (Var "main") "y"
 
 
@@ -311,7 +313,7 @@ ex8 = genId "f"
     $ Let ("p", Lambda "a1" $ Lambda "a2" 
               $ Apply (Apply (Observe "p" Right
               $ Lambda "b1" $ Lambda "b2" 
-              $ Case (Var "b1") [(c_0 [], Case (Var "b2") [(c_0 [], c_0 [])])]
+              $ Case (Var "b1") [(c_0 [] Right, Case (Var "b2") [(c_0 [] Right, c_0 [] Right)])]
               ) "a1") "a2")
     -- m a = let k = f a in p (g k) (h k) 
     $ Let ("m", Lambda "a" (Apply (Observe "m" Right
@@ -322,7 +324,7 @@ ex8 = genId "f"
           $ Apply (Apply (Var "p") "k_g") "k_h"
           ) "a"))
     -- main = m False
-    $ Let ("c", c_0 []) $ Apply (Var "m") "c"
+    $ Let ("c", c_0 [] Right) $ Apply (Var "m") "c"
 
   where genId :: String -> Expr -> Expr
         genId funName = Let (funName, Lambda "x"
@@ -341,7 +343,7 @@ ex8b = genId "f"
      $ genId "h"
      -- p a1 a2 = case a1 of False -> (case a2 of False -> False)
      $ Let ("p", Lambda "b1" $ Lambda "b2" 
-               $ Case (Var "b1") [(c_0 [], Case (Var "b2") [(c_0 [], c_0 [])])]
+               $ Case (Var "b1") [(c_0 [] Right, Case (Var "b2") [(c_0 [] Right, c_0 [] Right)])]
                )
      -- m a = let k = f a in p (g k) (h k) 
      $ Let ("m", Lambda "a" (Apply (Observe "m" Right
@@ -352,7 +354,7 @@ ex8b = genId "f"
            $ Apply (Apply (Var "p") "k_g") "k_h"
            ) "a"))
      -- main = m False
-     $ Let ("c", c_0 []) $ Apply (Var "m") "c"
+     $ Let ("c", c_0 [] Right) $ Apply (Var "m") "c"
 
   where genId :: String -> Expr -> Expr
         genId funName = Let (funName, Lambda "x"
@@ -374,7 +376,7 @@ ex8c = genId "f"
      $ genId "g"
      -- p a1 a2 = case a1 of False -> (case a2 of False -> False)
      $ Let ("p", Lambda "b1" $ Lambda "b2" 
-               $ Case (Var "b1") [(c_0 [], Case (Var "b2") [(c_0 [], c_0 [])])]
+               $ Case (Var "b1") [(c_0 [] Right, Case (Var "b2") [(c_0 [] Right, c_0 [] Right)])]
                )
      -- m a = let k_f = f a; k_g = g a in p k_f k_g
      $ Let ("m", Lambda "a" (Apply (Observe "m" Right
@@ -384,7 +386,7 @@ ex8c = genId "f"
            $ Apply (Apply (Var "p") "k_f") "k_g"
            ) "a"))
      -- main = m False
-     $ Let ("c", c_0 []) $ Apply (Var "m") "c"
+     $ Let ("c", c_0 [] Right) $ Apply (Var "m") "c"
 
   where genId :: String -> Expr -> Expr
         genId funName = Let (funName, Lambda "x"
@@ -411,25 +413,25 @@ ex8c = genId "f"
 prelude :: Expr -> Expr
 prelude e = Let ("map", Lambda "f" $ Lambda "xs" 
                       $ Case (Var "xs")
-                             [ (c_2 [], Var "xs")
-                             , ( c_3 ["h","t"]
+                             [ (c_2 [] Right, Var "xs")
+                             , ( c_3 ["h","t"] Right
                                , Let ("h'", Apply (Var "f") "h")
                                $ Let ("t'", Apply (Apply (Var "map") "f") "t")
-                               $ c_3 ["h'","t'"]
+                               $ c_3 ["h'","t'"] Right
                                )
                              ])
           $ Let ("foldl", Lambda "f" $ Lambda "z"  $ Lambda "xs"
                         $ Case (Var "xs")
-                             [ (c_2 [], Var "z")
-                             , ( c_3 ["h","t"]
+                             [ (c_2 [] Right, Var "z")
+                             , ( c_3 ["h","t"] Right
                                , Let ("z'", Apply (Apply (Var "f") "z") "h")
                                $ Apply (Apply (Apply (Var "foldl") "f") "z'") "t"
                                )
                              ])
           $ Let ("reverse", Lambda "xs"
                           $ Let ("f", Lambda "z" $ Lambda "x"
-                                    $ c_3 ["x","z"])
-                          $ Let ("z", c_2 [])
+                                    $ c_3 ["x","z"] Right)
+                          $ Let ("z", c_2 [] Right)
                           $ Apply (Apply (Apply (Var "foldl") "f") "z") "xs")
           $ e
 

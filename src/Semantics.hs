@@ -13,7 +13,7 @@ data Expr = Lambda     Name Expr
           | Apply      Expr Name
           | Var        Name
           | Let        (Name,Expr) Expr
-          | Constr     ConstrId [Name]
+          | Constr     ConstrId [Name] Judgement
           | Case       Expr [(Expr,Expr)]
 
           | Observe    Label  Judgement           Expr
@@ -29,12 +29,10 @@ deriving instance Typeable Judgement
 
 type Label    = String
 
-data ConstrId = WrongConstr 
-              | ConstrId Int 
+data ConstrId = ConstrId Int 
               deriving (Eq,Ord,Data,Typeable)
 
-instance Show ConstrId where show WrongConstr  = ":("
-                             show (ConstrId i) = "c_" ++ show i
+instance Show ConstrId where show (ConstrId i) = "c_" ++ show i
 
 --------------------------------------------------------------------------------
 -- The state
@@ -162,14 +160,13 @@ reduce (Observed q jmt e) = do
       return (Exception msg)
 
     -- ObsC rule in paper
-    (Constr s ns) -> do
-      let t = case jmt of Right -> s; Wrong -> WrongConstr
-                          Unassessed -> error "Unassessed judgement in ObsC rule"
+    (Constr s ns jmt_c) -> do
+      let jmt' = case (jmt,jmt_c) of (Right,Right) -> Right; _ -> Wrong
       i <- getUniq
-      doTrace (ConstEvent i p t (length ns))
+      doTrace (ConstEvent i p s (length ns) jmt')
       ms <- mapM getFreshVar ns
       eval $ foldl (\e' (m,n,k) -> Let (m, Observed (Parent i k) jmt (Var n)) e')
-                   (Constr t ms) (zip3 ms ns [1..])
+                   (Constr s ms jmt') (zip3 ms ns [1..])
 
     -- ObsL rule in paper
     (Lambda x e') -> do
@@ -194,23 +191,23 @@ reduce (FunObs p jmt x x1 e) = do
 reduce (Case e1 alts) = do
   e1' <- eval e1
   case e1' of
-    (Constr i ys) -> case myLookup i alts of
-                       (Just alt) -> red ys alt
-                       Nothing    -> return $ non_exh i
+    (Constr i ys _) -> case myLookup i alts of
+                          (Just alt) -> red ys alt
+                          Nothing    -> return $ non_exh i
     _ -> return $ Exception "Case on a non-Constr expression"
     
-    where non_exh n                = Exception $ "Non-exhaustive patterns in Case: " ++ show n
-          myLookup n               = (lookup n) . (map $ \(Constr t ys,e)->(t,(Constr t ys,e)))
-          red ys (Constr _ xs, e2) = eval $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
-          red _  _                 = error "Substitute in reduce Case alternative went wrong"
+    where non_exh n                  = Exception $ "Non-exhaustive patterns in Case: " ++ show n
+          myLookup n                 = (lookup n) . (map $ \(Constr t ys j,e)->(t,(Constr t ys j,e)))
+          red ys (Constr _ xs _, e2) = eval $ foldl (\e (x,y) -> subst x y e) e2 (zip xs ys)
+          red _  _                   = error "Substitute in reduce Case alternative went wrong"
 
-reduce (Constr i xs) = return $ Constr i xs
+reduce (Constr i xs jmt) = return $ Constr i xs jmt
 
 reduce (Print e) = do
   e' <- eval e
   case e' of
-        (Constr i ns) -> do
-          doPrint (show i)
+        (Constr i ns _) -> do -- MF TODO should we print the constructors judgment here?
+          doPrint $ show i
           mapM_ printField ns
           return e'
         (Exception s) -> do
@@ -238,7 +235,7 @@ subst n m (Observed p j e)      = Observed p j (subst n m e)
 subst n m (FunObs p j n' n'' e) = FunObs p j (sub n m n') (sub n m n'') (subst n m e)
 subst n m (Case e1 alts)        = Case (subst n m e1) 
                                 $ map (\(e2,e3) -> (subst n m e2, subst n m e3)) alts
-subst n m (Constr s ns)         = Constr s $ map (sub n m) ns
+subst n m (Constr s ns jmt)     = Constr s (map (sub n m) ns) jmt
 subst n m (Print e)             = Print (subst n m e)
 subst _ _ e@Exception{}         = e
 
@@ -283,8 +280,8 @@ fresh (FunObs p j x x1 e) = do
 
 fresh (Exception msg) = return (Exception msg)
 
-fresh (Constr s ns) =
-  return (Constr s ns)
+fresh (Constr s ns jmt) =
+  return (Constr s ns jmt)
 
 fresh (Case e1 alts) = do
   let (e2s,e3s) = unzip alts
@@ -310,7 +307,8 @@ type Trace = [Event]
 data Event
   = RootEvent  { eventUID :: UID, eventLabel  :: Label }
   | EnterEvent { eventUID :: UID, eventParent :: Parent}
-  | ConstEvent { eventUID :: UID, eventParent :: Parent, eventRepr :: ConstrId , eventLength :: Int}
+  | ConstEvent { eventUID :: UID, eventParent :: Parent, eventRepr :: ConstrId
+               , eventLength :: Int, eventJudgement :: Judgement}
   | LamEvent   { eventUID :: UID, eventParent :: Parent}
   | AppEvent   { eventUID :: UID, eventParent :: Parent}
   deriving (Show,Eq,Ord)

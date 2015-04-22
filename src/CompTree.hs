@@ -71,8 +71,8 @@ judgeTree frt e@AppEvent{}
          (Right,jmt)     -> jmt
          (Wrong,_  )     -> Right
          (Unassessed, _) -> error "judgeTree expected Right or Wrong, got Unassessed"
-judgeTree _ ConstEvent{eventRepr=WrongConstr} = Wrong
-judgeTree frt e = judgeEventList frt (dfsChildren frt e)
+judgeTree _   ConstEvent{eventJudgement=Wrong} = Wrong
+judgeTree frt e                                = judgeEventList frt (dfsChildren frt e)
 
 judgeEventList :: EventForest -> [Maybe Event] -> Judgement
 judgeEventList frt = bool2jmt . (all isRight) . (map judgeME)
