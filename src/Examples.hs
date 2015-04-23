@@ -382,6 +382,9 @@ cex1b = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fu
 --  with judgment Wrong
 -- 
 -- *** Exception: r_13: peek on empty Constant Value Stack!
+--
+-- Solution: in DataDep: peekCVS used to throw above exception when the stack is empty.
+-- Now we return CVRoot.
 
 cex2 :: Expr
 cex2 = Let ("h",Observe "h" Right 

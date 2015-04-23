@@ -41,7 +41,13 @@ constants frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
 
         mkConstantValue :: Event -> Location -> ConstantValue
         mkConstantValue e loc = let us = treeUIDs frt e
-                          in ConstantValue (eventUID r) loc (minimum us) (maximum us)
+                          in ConstantValue (eventUID . findApp $ e) loc (minimum us) (maximum us)
+
+        apps :: [Event]
+        apps = topLevelApps frt r
+
+        findApp :: Event -> Event
+        findApp e = head $ filter (\a -> e `elem` (eventsInTree frt a)) apps
 
 
 -- Is given event the root of a (sub)tree describing a constant value?
@@ -125,7 +131,7 @@ popMatchCVS (r:cvs) a = case (valLoc r, valLoc a) of
   where err = error "Constant Value Stack mismatch on pop!"
 
 peekCVS :: CVStack -> ConstantValue -> ConstantValue
-peekCVS []     v = error $ (fst . shwCV) v ++ ": peek on empty Constant Value Stack!"
-peekCVS (cv:_) _ = cv
+peekCVS []     = CVRoot
+peekCVS (cv:_) = cv
 
 
