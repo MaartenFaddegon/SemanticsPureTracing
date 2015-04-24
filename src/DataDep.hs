@@ -101,7 +101,7 @@ mkResDepTree ddt = Graph (root ddt)
         -- visit one child
         visit' :: CVStack -> ConstantValue -> [CVArc] -> [CVArc]
         visit' cvs v as
-          | (isResult . valLoc) v = let as' = Arc (peekCVS cvs v) v () : as
+          | (isResult . valLoc) v = let as' = Arc (peekCVS cvs) v () : as
                                     in  visit (pushCVS cvs v) (succs ddt v) as'
           | otherwise             =     visit (popCVS cvs)    (succs ddt v) as
 
@@ -130,7 +130,7 @@ popMatchCVS (r:cvs) a = case (valLoc r, valLoc a) of
   _                                -> err
   where err = error "Constant Value Stack mismatch on pop!"
 
-peekCVS :: CVStack -> ConstantValue -> ConstantValue
+peekCVS :: CVStack -> ConstantValue
 peekCVS []     = CVRoot
 peekCVS (cv:_) = cv
 

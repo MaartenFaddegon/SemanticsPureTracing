@@ -374,22 +374,19 @@ cex1b = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fu
 
 -- Counter example 2
 --
--- h { { _ -> (c_1)} -> (c_1) { { _ -> (c_1)} -> (c_1)} -> (c_1)}
---  with UIDs [0,1,2,9,11,17,18,19,26,10,27,3,5,6,7,12,16,20,21,25,8,28,4,29]
---  with judgment Wrong
--- g { _ -> (c_1)}
---  with UIDs [13,14,15,22,23,24]
---  with judgment Wrong
+-- s3:  h =  { { _ -> (c_1)} -> (c_1)} -> (c_1)
+--       with UIDs [0,1,3,5,6,7,12,16,20,21,25,8,28,4,29]
+--       with judgment Wrong
+-- s9:  h =  { _ -> (c_1)} -> (c_1)
+--       with UIDs [0,1,9,11,17,18,19,26,10,27]
+--       with judgment Right
+-- s22: g =  _ -> (c_1)
+--       with UIDs [13,14,22,23,24]
+--       with judgment Wrong
 -- 
--- *** Exception: r_13: peek on empty Constant Value Stack!
---
--- Solution: in DataDep: peekCVS used to throw above exception when the stack is empty.
--- Now we return CVRoot.
-
 cex2 :: Expr
 cex2 = Let ("h",Observe "h" Right 
                 (Lambda "f" (Let ("g",Observe "g" Wrong 
-                                      -- (Lambda "a" ( c_3 ["i","g"] Right))
                                       (Lambda "a" ( c_1 [] Right))
                                  ) (Apply (Var "f") "g")
                             )

@@ -36,12 +36,21 @@ findCompStmt cs v = case filter (\c -> valStmt v `elem` stmtUID c) cs of
 -- Computation Statements
 
 mkStmts :: Trace -> [CompStmt]
-mkStmts trc = map (mkStmt frt) (filter isRoot trc)
+mkStmts trc = foldl (\cs r -> cs ++ (map (mkStmt frt r) (topLevelApps frt r))) [] 
+                    (filter isRoot trc)
   where frt = mkEventForest trc
 
-mkStmt :: EventForest -> Event -> CompStmt
-mkStmt frt (e@(RootEvent{eventLabel=lbl})) = CompStmt lbl i repr j
+mkStmt :: EventForest -> Event -> Event -> CompStmt
+mkStmt frt (e@(RootEvent{eventLabel=lbl})) a@AppEvent{} = CompStmt lbl i' repr' j
+  where (CompStmt _ i repr j) = mkStmt' frt a
+        repr'                 = lbl ++ " = " ++ repr
+        i'                    = eventUID e : eventUID lam : i
+        [Just lam]            = dfsChildren frt e
+mkStmt _ e e' = error $ "mkStmt should be given RootEvent and AppEvent, was given " 
+                      ++ show e ++ " and " ++ show e'
 
+mkStmt' :: EventForest -> Event -> CompStmt
+mkStmt' frt (e@(AppEvent{})) = CompStmt "??" i repr j
         where i :: [UID]
               i = treeUIDs frt e
 
@@ -61,26 +70,21 @@ mkStmt frt (e@(RootEvent{eventLabel=lbl})) = CompStmt lbl i repr j
               post (Just AppEvent{})              _ = id
 
               j :: Judgement
-              j = judgeTree frt e
-mkStmt _ e = error $ "mkStmt should be given RootEvent, was given " ++ show e
+              j = judgeApp frt e
 
-judgeTree :: EventForest -> Event -> Judgement
-judgeTree frt e@AppEvent{} 
-  = let [arg,res] = dfsChildren frt e
-    in case (judgeEventList frt [arg],judgeEventList frt [res]) of
-         (Right,jmt)     -> jmt
-         (Wrong,_  )     -> Right
-         (Unassessed, _) -> error "judgeTree expected Right or Wrong, got Unassessed"
-judgeTree _   ConstEvent{eventJudgement=Wrong} = Wrong
-judgeTree frt e                                = judgeEventList frt (dfsChildren frt e)
+judgeApp :: EventForest -> Event -> Judgement
+judgeApp frt a@AppEvent{} = case (allRight arg, allRight res) of
+        (True, False) -> Wrong
+        (False,_)     -> Right
+        (True, True)  -> Right
 
-judgeEventList :: EventForest -> [Maybe Event] -> Judgement
-judgeEventList frt = bool2jmt . (all isRight) . (map judgeME)
-  where judgeME Nothing  = Right
-        judgeME (Just e) = judgeTree frt e
-        isRight Right    = True
-        isRight _        = False
-        bool2jmt True    = Right
-        bool2jmt _       = Wrong
+  where [arg,res] = dfsChildren frt a
 
+        allRight :: Maybe Event -> Bool
+        allRight = (all (\e -> Right == eventJudgement e)) . (constList frt)
 
+constList :: EventForest -> Maybe Event -> [Event]
+constList _   Nothing  = []
+constList frt (Just e) = filter isConst (eventsInTree frt e)
+  where isConst ConstEvent{} = True
+        isConst _            = False
