@@ -1,0 +1,17 @@
+#!/bin/bash
+rm -f .stop
+FAILURE=0
+
+echo -n "Testing started " > log
+date >> log
+for ((x=1; x<=10; x++)); do 
+  (time dist/build/Semantics-test/Semantics-test) >> log 2>&1
+  if [ $? -ne 0 ]; then
+    FAILURE=1
+  fi
+done
+if [[ $FAILURE -eq 0 ]]; then
+  echo "Testing completed successful!" >> log
+else
+  echo "Some tests FAILED!" >> log
+fi

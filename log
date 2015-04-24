@@ -1,0 +1,62 @@
+Testing started Fri 24 Apr 11:10:53 BST 2015
++++ OK, passed 10000 tests.
+
+
+real	15m10.879s
+user	15m7.203s
+sys	0m3.420s
++++ OK, passed 10000 tests.
+
+
+real	15m6.311s
+user	15m2.463s
+sys	0m3.593s
++++ OK, passed 10000 tests.
+
+
+real	15m12.194s
+user	15m8.353s
+sys	0m3.587s
++++ OK, passed 10000 tests.
+
+
+real	15m25.346s
+user	15m21.480s
+sys	0m3.607s
++++ OK, passed 10000 tests.
+
+
+real	14m55.109s
+user	14m50.367s
+sys	0m4.493s
++++ OK, passed 10000 tests.
+
+
+real	15m20.704s
+user	15m16.960s
+sys	0m3.487s
++++ OK, passed 10000 tests.
+
+
+real	15m34.782s
+user	15m30.943s
+sys	0m3.577s
++++ OK, passed 10000 tests.
+
+
+real	15m31.665s
+user	15m27.927s
+sys	0m3.477s
++++ OK, passed 10000 tests.
+
+
+real	15m12.833s
+user	15m8.980s
+sys	0m3.597s
++++ OK, passed 10000 tests.
+
+
+real	15m15.915s
+user	15m12.340s
+sys	0m3.320s
+Testing completed successful!
