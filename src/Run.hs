@@ -102,3 +102,35 @@ showCompStmt (CompStmt _ i r j) = r
 showArc :: Arc Vertex () -> String
 showArc _ = ""
 
+--------------------------------------------------------------------------------
+
+type TraceGraph  = Graph EventVertex ParentPosition
+data EventVertex = EventVertex Event | TraceGraphRoot
+  deriving Eq
+
+mkTraceGraph :: Trace -> TraceGraph
+mkTraceGraph trc = Graph TraceGraphRoot vs as
+  where vs = TraceGraphRoot : (map EventVertex trc)
+        as = map mkArc trc
+
+        mkArc :: Event -> Arc EventVertex ParentPosition
+        mkArc tgt@RootEvent{} = Arc TraceGraphRoot    (EventVertex tgt) 0
+        mkArc tgt = case lookup (parentUID . eventParent $ tgt) es of 
+          (Just src) -> Arc (EventVertex src) (EventVertex tgt) 
+                            (parentPosition . eventParent $ tgt)
+
+        es = map (\e -> (eventUID e, e)) trc
+
+
+dispTrace :: Expr -> IO ()
+dispTrace = (display shw) . mkTraceGraph . getTrace . red
+  where shw :: TraceGraph -> String
+        shw g = showWith g shwEvent shwEventArc
+
+        shwEvent (EventVertex (RootEvent i lbl)     ) = (show i ++ ": " ++ lbl   , "")
+        shwEvent (EventVertex (EnterEvent i _)      ) = (show i ++ ": Ent"       , "")
+        shwEvent (EventVertex (ConstEvent i _ c _ _)) = (show i ++ ": " ++ show c, "")
+        shwEvent (EventVertex (LamEvent i _)        ) = (show i ++ ": Lam"       , "")
+        shwEvent (EventVertex (AppEvent i _)        ) = (show i ++ ": @"         , "")
+
+        shwEventArc (Arc _ _ pos) = show pos

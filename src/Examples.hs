@@ -339,6 +339,11 @@ ex8c = genId "f"
 --------------------------------------------------------------------------------
 -- Counter examples found with QuickCheck
 
+-- Counter example 1: use of free variables in an observed function
+--
+-- Solution: add static analysis to quickcheck that rejects testing of
+-- generated expressions with free variables.
+
 cex1 :: Expr
 cex1 = Case (Apply (Let ("d",Apply (Let ("h",Apply (Let ("h",c_3 ["h","i"] Right) (c_1 [] Right)) "b") (Observe "M" Wrong (Lambda "d" (Let ("e",c_3 ["b","b"] Right) (c_1 [] Right))))) "g") (Lambda "a" (Let ("h",Lambda "f" (Case (c_1 [] Right) [(c_0 [] Right,c_3 ["e","c"] Right),(c_1 [] Right,c_3 ["a","b"] Right),(c_2 [] Right,c_3 ["h","a"] Right),(c_3 ["e","f"] Right,c_3 ["g","f"] Right)])) (Var "d")))) "i") [(c_0 [] Right,Let ("g",c_1 [] Right) (c_3 ["e","g"] Right)),(c_1 [] Right,Apply (Observe "G" Right (Lambda "i" (Var "d"))) "e"),(c_2 [] Right,Lambda "c" (Let ("h",Lambda "h" (Let ("i",c_2 [] Right) (Observe "N" Right (Lambda "b" (c_3 ["b","i"] Right))))) (Var "g"))),(c_3 ["a","e"] Right,Observe "I" Right (Lambda "d" (Lambda "h" (Let ("e",Case (c_1 [] Right) [(c_0 [] Right,c_3 ["f","a"] Right),(c_1 [] Right,c_3 ["h","h"] Right),(c_2 [] Right,c_3 ["e","c"] Right),(c_3 ["c","e"] Right,c_3 ["a","i"] Right)]) (Let ("g",c_3 ["h","i"] Right) (Case (c_1 [] Right) [(c_0 [] Right,c_2 [] Right),(c_1 [] Right,c_3 ["f","a"] Right),(c_2 [] Right,c_2 [] Right),(c_3 ["b","c"] Right,c_0 [] Right)]))))))]
 
@@ -366,6 +371,27 @@ cex1b = Let ("f", (Observe "f" Wrong (Lambda "x" (Var "x"))))    -- defective fu
          -- this is not a problem because now we see that function g gets a wrong
          -- value as argument.
          [(c_1 [] Right, Apply (Var "g") "v")]
+
+-- Counter example 2
+--
+-- s3:  h =  { { _ -> (c_1)} -> (c_1)} -> (c_1)
+--       with UIDs [0,1,3,5,6,7,12,16,20,21,25,8,28,4,29]
+--       with judgment Wrong
+-- s9:  h =  { _ -> (c_1)} -> (c_1)
+--       with UIDs [0,1,9,11,17,18,19,26,10,27]
+--       with judgment Right
+-- s22: g =  _ -> (c_1)
+--       with UIDs [13,14,22,23,24]
+--       with judgment Wrong
+-- 
+cex2 :: Expr
+cex2 = Let ("h",Observe "h" Right 
+                (Lambda "f" (Let ("g",Observe "g" Wrong 
+                                      (Lambda "a" ( c_1 [] Right))
+                                 ) (Apply (Var "f") "g")
+                            )
+                )
+           ) (Apply (Var "h") "h")
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
