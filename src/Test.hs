@@ -6,7 +6,9 @@ import FreeVar
 import Prelude hiding (Right)
 import Data.Graph.Libgraph
 import Test.QuickCheck
+import Test.QuickCheck.Test
 import Control.Monad.State
+import System.Exit
 
 --------------------------------------------------------------------------------
 -- QuickCheck soundness property
@@ -94,10 +96,14 @@ instance Arbitrary Expr where
 -- Main
 
 main :: IO ()
-main = quickCheckWith args prop_actuallyFaulty
+main = do
+  r <- quickCheckWithResult args prop_actuallyFaulty
+  putStrLn (output r)
+  if isSuccess r then exitSuccess else exitFailure
+
   where args = Args { replay          = Nothing
-                    , maxSuccess      = 10000  -- number of tests
-                    , maxDiscardRatio = 500    -- many random exprs will not be valid
-                    , maxSize         = 100    -- max subexpressions
-                    , chatty          = True
+                    , maxSuccess      = 10000    -- number of tests
+                    , maxDiscardRatio = 1000000  -- many random exprs will not be valid
+                    , maxSize         = 30       -- max subexpressions
+                    , chatty          = False
                     }
