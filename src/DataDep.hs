@@ -72,14 +72,14 @@ notEnclosed vs v = all (not . (flip encloses) v) vs
 
 maybeDepends :: [ConstantValue] -> ConstantValue -> Maybe (CVArc)
 maybeDepends vs v = do
-  w <- closestEnclosing v vs
+  w <- strictlyEnclosing v vs
   return $ Arc w v ()
 
 encloses :: ConstantValue -> ConstantValue -> Bool
 encloses v w = valMin v < valMin w && valMax v > valMax w
 
-closestEnclosing :: ConstantValue -> [ConstantValue] -> Maybe ConstantValue
-closestEnclosing v vs = case filter (flip encloses $ v) vs of
+strictlyEnclosing :: ConstantValue -> [ConstantValue] -> Maybe ConstantValue
+strictlyEnclosing v vs = case filter (flip encloses $ v) vs of
   [] -> Nothing
   ws -> Just . head . sortBy (comparing minMaxDiff) $ ws
 
@@ -113,6 +113,7 @@ mkResDepTree ddt = Graph (root ddt)
         isResult Trunk          = True
         isResult (ResultOf l)   = isResult l
         isResult (ArgumentOf _) = False
+        isResult (FieldOf _ _)  = False
 
 type CVStack = [ConstantValue]
 

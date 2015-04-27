@@ -18,12 +18,14 @@ mkEventForest trc = map children trc
 
 data InfixOrPrefix = Infix | Prefix
 
-data Location = Trunk | ArgumentOf Location | ResultOf Location deriving Eq
+data Location = Trunk | ArgumentOf Location | ResultOf Location | FieldOf Int Location
+  deriving Eq
 
 instance Show Location where 
    show Trunk            = ""
    show (ArgumentOf loc) = 'a' : show loc
    show (ResultOf   loc) = 'r' : show loc
+   show (FieldOf n  loc) = 'f' : show n ++ show loc
 
 data ArgOrRes = Arg | Res
 
@@ -68,25 +70,27 @@ dfsChildren frt e = case e of
 dfsFold :: InfixOrPrefix -> Visit a -> Visit a -> a 
         -> Location -> (Maybe Event) -> EventForest -> a
 
-dfsFold ip pre post z w me frt 
-  = post me w $ case me of
+dfsFold ip pre post z loc me frt 
+  = post me loc $ case me of
       Nothing -> z'
 
       (Just (AppEvent _ _)) -> let [arg,res] = cs
         in case ip of
-          Prefix -> csFold $ zip cs [ArgumentOf w,ResultOf w]
-          Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf w) arg frt
-                        z2 = pre me w z1
-                    in  dfsFold ip pre post z2 (ResultOf w) res frt
+          Prefix -> csFold $ zip cs [ArgumentOf loc,ResultOf loc]
+          Infix  -> let z1 = dfsFold ip pre post z (ArgumentOf loc) arg frt
+                        z2 = pre me loc z1
+                    in  dfsFold ip pre post z2 (ResultOf loc) res frt
 
-      _ -> csFold $ zip cs (repeat w)
+      (Just ConstEvent{}) -> csFold $ zip cs $ map (\i -> FieldOf i loc) [1..]
 
-  where z'  = pre me w z
+      _ -> csFold $ zip cs (repeat loc)
+
+  where z'  = pre me loc z
 
         cs :: [Maybe Event]
         cs = case me of (Just e) -> dfsChildren frt e; Nothing -> error "dfsFold filter failed"
 
-        csFold = foldl (\z'' (c,w') -> dfsFold ip pre post z'' w' c frt) z'
+        csFold = foldl (\z'' (c,loc') -> dfsFold ip pre post z'' loc' c frt) z'
 
 treeUIDs :: EventForest -> Event -> [UID]
 treeUIDs frt = (map eventUID) . eventsInTree frt
