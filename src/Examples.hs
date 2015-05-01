@@ -252,6 +252,22 @@ ex7c = Let ("not",  Lambda "a" $ Apply (Observe "not"  Right (Lambda "b" $ Case 
 traceEx7c :: Trace
 traceEx7c = reverse . snd . evaluate $ ex7c
 
+-- ex7d:
+--   app f x = f x
+--   main = (app not) True
+ex7d :: Expr
+ex7d = Let ("not",  Observe "not"  Right $ Lambda "b" $ Case (Var "b") 
+               [(c_1 [] Right, c_0 [] Right)
+               , (c_0 [] Right, c_1 [] Right)]
+           )
+     $ Let ("app", Observe "app" Right $ Lambda "f" $ Lambda "x" $ 
+                Apply (Var "f") "x"
+           )
+     $ Let ("main", Observe "main" Right $ Lambda "x" $ 
+                Apply (Apply (Var "app") "not") "x")
+     $ Let ("y",    c_1 [] Right)
+     $ {-in-} Apply (Var "main") "y"
+
 -- Example 8: How does our technique handle sharing?
 
 -- How does re-use of the result of "f" affect our dependence inference?
@@ -366,6 +382,20 @@ ex9 = {- import -} prelude
     $ Let ("k2", c_3 ["false", "k1"] Right)
     $ Let ("k3", c_3 ["false", "k2"] Right)
     $ {- main= -} Let ("ys", Apply (Var "mapNot") "k3") $ Apply (Var "all") "ys"
+
+-- as ex9 but with function not also traced
+ex9b :: Expr
+ex9b = {- import -} prelude
+     $ {- import -} notTraced
+     $ {- import -} myAnd
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+     $ Let ("mapNot", Observe "mapNot" Right $ Lambda "xs" $ Apply (Apply (Var "map") "n") "xs")
+     $ Let ("all", Observe "all" Right $ Apply (Apply (Var "foldl") "and") "true")
+     $ Let ("k0", c_2 [] Right)
+     $ Let ("k1", c_3 ["true", "k0"] Right)
+     $ Let ("k2", c_3 ["false", "k1"] Right)
+     $ {- main= -} Let ("ys", Apply (Var "mapNot") "k2") $ Apply (Var "all") "ys"
 
 
 --------------------------------------------------------------------------------

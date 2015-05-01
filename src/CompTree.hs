@@ -5,6 +5,7 @@ import EventForest
 
 import DataDep
 import Data.Graph.Libgraph
+import Data.List(nub)
 
 data CompStmt
  = CompStmt
@@ -21,9 +22,14 @@ type CompTree = Graph Vertex ()
 --------------------------------------------------------------------------------
 -- Computation Tree
 
+-- One computation statement can have multiple result-events. Sometime these add
+-- new information, often the information is just a duplicate of what we already
+-- know. With nub we remove the duplicates.
 mkCompTree :: [CompStmt] -> ConstantTree -> CompTree
-mkCompTree cs = mapGraph findVertex
-  where findVertex :: ConstantValue -> Vertex
+mkCompTree cs ddt = Graph r (nub vs) (nub as)
+  where Graph r vs as = mapGraph findVertex ddt
+
+        findVertex :: ConstantValue -> Vertex
         findVertex CVRoot = RootVertex
         findVertex v      = Vertex (findCompStmt cs v)
 

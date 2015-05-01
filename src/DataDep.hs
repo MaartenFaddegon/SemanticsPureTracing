@@ -113,7 +113,7 @@ mkResDepTree ddt = Graph (root ddt)
         isResult Trunk          = True
         isResult (ResultOf l)   = isResult l
         isResult (ArgumentOf _) = False
-        isResult (FieldOf _ _)  = False
+        isResult (FieldOf _ l)  = isResult l
 
 type CVStack = [ConstantValue]
 
