@@ -38,6 +38,18 @@ mapTraced :: Expr -> Expr
 mapTraced = Let ("mapT", Lambda "f" $ Lambda "xs"
                        $ Apply (Apply (Observe "map" Right (Var "map")) "f") "xs" )
 
+-- mapTraced' is as mapTraced, but with 
+mapTraced' :: Expr -> Expr
+mapTraced' = Let ("mapT", Observe "mapT" Right $ Lambda "f" $ Lambda "xs" 
+                       $ Case (Var "xs")
+                              [ (c_2 [] Right, Var "xs")
+                              , ( c_3 ["h","t"] Right
+                                , Let ("h'", Apply (Var "f") "h")
+                                $ Let ("t'", Apply (Apply (Var "mapT") "f") "t")
+                                $ c_3 ["h'","t'"] Right
+                                )
+                              ])
+
 -- data B = T | F
 -- n :: B -> B
 myNot :: Expr -> Expr
@@ -268,6 +280,22 @@ ex7d = Let ("not",  Observe "not"  Right $ Lambda "b" $ Case (Var "b")
      $ Let ("y",    c_1 [] Right)
      $ {-in-} Apply (Var "main") "y"
 
+-- ex7e:
+--   not True = False
+--   not False = True
+--   appT f = f True
+--   neg b = (appT not)
+ex7e :: Expr
+ex7e = Let ("true",  c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+     $ Let ("not",  Observe "not"  Right $ Lambda "b" $ Case (Var "b") 
+               [(c_1 [] Right, c_0 [] Right)
+               , (c_0 [] Right, c_1 [] Right)]
+           )
+     $ Let ("appT", Observe "appT" Right $ Lambda "f" $ Apply (Var "f") "true")
+     $ Let ("neg", Observe "neg" Right $ Lambda "b" (Apply (Var "appT") "not"))
+     $ {-in-} Apply (Var "neg") "false"
+
 -- Example 8: How does our technique handle sharing?
 
 -- How does re-use of the result of "f" affect our dependence inference?
@@ -397,6 +425,70 @@ ex9b = {- import -} prelude
      $ Let ("k2", c_3 ["false", "k1"] Right)
      $ {- main= -} Let ("ys", Apply (Var "mapNot") "k2") $ Apply (Var "all") "ys"
 
+-- as ex9b but with map also traced
+ex9c :: Expr
+ex9c = {- import -} prelude
+     $ {- import -} notTraced
+     $ {- import -} mapTraced
+     $ {- import -} myAnd
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+     $ Let ("mapNot", Observe "mapNot" Right $ Lambda "xs" $ Apply (Apply (Var "mapT") "n") "xs")
+     $ Let ("all", Observe "all" Right $ Apply (Apply (Var "foldl") "and") "true")
+     $ Let ("k0", c_2 [] Right)
+     $ Let ("k1", c_3 ["true", "k0"] Right)
+     $ Let ("k2", c_3 ["false", "k1"] Right)
+     $ {- main= -} Let ("ys", Apply (Var "mapNot") "k2") $ Apply (Var "all") "ys"
+
+-- map and not observed, not is faulty (always returns True)
+ex9d :: Expr
+ex9d = {- import -} prelude
+     $ {- import -} mapTraced'
+     $ {- import -} myAnd
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+     $ Let ("not", Observe "not" Wrong $ Lambda "b"$ Case (Var "b")
+                             [ (c_1 [] Right, c_1 [] Right)
+                             , (c_0 [] Right, c_1 [] Right)
+                             ])
+     $ Let ("mapNot", Lambda "xs" $ Apply (Apply (Var "mapT") "not") "xs")
+     $ Let ("all", Apply (Apply (Var "foldl") "and") "true")
+     $ Let ("k0", c_2 [] Right)
+     $ Let ("k1", c_3 ["true", "k0"] Right)
+     $ Let ("k2", c_3 ["false", "k1"] Right)
+     $ {- main= -} Let ("ys", Apply (Var "mapNot") "k2") $ Apply (Var "all") "ys"
+
+-- program with multi-argument functions:
+--   not = observe "not" not'
+--   not' True  = False
+--   not' False = True
+--   
+--   and True True = True
+--   and _    _    = False
+--   
+--   nand = observe "nand" nand'
+--   nand' b d = and (not b) (not d)
+ex10a :: Expr
+ex10a = {- import -} prelude
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+      $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                      [ (c_1 [] Right, c_0 [] Right)
+                      , (c_0 [] Right, c_1 [] Right)
+                      ])
+      $ Let ("and", Lambda "b"$ Lambda "d" $ Case (Var "b")
+      -- $ Let ("and", Observe "and" Right $ Lambda "b"$ Lambda "d" $ Case (Var "b")
+                      [ (c_0 [] Right, c_0 [] Right)
+                      , (c_1 [] Right, Case (Var "d")
+                        [ (c_0 [] Right, c_0 [] Right)
+                        , (c_1 [] Right, c_1 [] Right)
+                        ])
+                      ])
+      $ Let ("nand", Observe "nand" Wrong $ Lambda "b"$ Lambda "d"
+                $ Let ("nb",Apply (Var "not") "b")
+                $ Let ("nd",Apply (Var "not") "d")
+                $ Apply (Apply (Var "and") "nb") "nd")
+      $ Apply (Apply (Var "nand") "false") "true"
 
 --------------------------------------------------------------------------------
 -- Counter examples found with QuickCheck

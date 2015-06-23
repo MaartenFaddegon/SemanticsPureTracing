@@ -311,13 +311,13 @@ data Event
                , eventLength :: Int, eventJudgement :: Judgement}
   | LamEvent   { eventUID :: UID, eventParent :: Parent}
   | AppEvent   { eventUID :: UID, eventParent :: Parent}
-  deriving (Show,Eq,Ord)
+  deriving (Eq,Ord)
 
 type UID = Int
 type ParentPosition = Int
 
 data Parent = Parent {parentUID :: UID,  parentPosition :: ParentPosition} 
-              deriving (Show,Eq,Ord,Data,Typeable)
+              deriving (Eq,Ord,Data,Typeable)
 
 getUniq :: State Context UID
 getUniq = do
@@ -329,5 +329,18 @@ doTrace :: Event -> State Context ()
 doTrace rec = do
   doLog $ "* " ++ show rec
   modify $ \cxt -> cxt{trace = rec : trace cxt}
+
+-- Latex output for events to import in the paper
+
+instance Show Parent where
+  show (Parent uid pos) = "\\parent{" ++ show uid ++ "." ++ show pos ++ "}"
+
+instance Show Event where
+  show (RootEvent uid lbl)        = show uid ++ " & \\troot{``" ++ lbl ++ "\"}"
+  show (EnterEvent uid p)         = show uid ++ " & \\tent{(" ++ show p ++ ")}"
+  show (ConstEvent uid p c len _) = show uid ++ " & \\tcon{(" ++ show p ++ ")}{" ++ show c ++ "}{" ++ show len ++ "}"
+  show (LamEvent uid p)           = show uid ++ " & \\tlam{(" ++ show p ++ ")}"
+  show (AppEvent uid p)           = show uid ++ " & \\tapp{(" ++ show p ++ ")}"
+
 
 
