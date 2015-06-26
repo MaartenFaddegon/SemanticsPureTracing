@@ -477,7 +477,6 @@ ex10a = {- import -} prelude
                       , (c_0 [] Right, c_1 [] Right)
                       ])
       $ Let ("and", Lambda "b"$ Lambda "d" $ Case (Var "b")
-      -- $ Let ("and", Observe "and" Right $ Lambda "b"$ Lambda "d" $ Case (Var "b")
                       [ (c_0 [] Right, c_0 [] Right)
                       , (c_1 [] Right, Case (Var "d")
                         [ (c_0 [] Right, c_0 [] Right)
@@ -489,6 +488,43 @@ ex10a = {- import -} prelude
                 $ Let ("nd",Apply (Var "not") "d")
                 $ Apply (Apply (Var "and") "nb") "nd")
       $ Apply (Apply (Var "nand") "false") "true"
+
+
+-- program with non nullary constructors
+--
+-- data D = D Bool Bool
+--
+-- not = observe "not" not'
+-- not' True  = False
+-- not' False = True
+-- 
+-- and True True = True
+-- and _    _    = False
+-- 
+-- nandD = observe "nand" nand'
+-- nandD' (D b d) = and (not b) (not d)
+--
+ex11a = {- import -} prelude
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+      $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                      [ (c_1 [] Right, c_0 [] Right)
+                      , (c_0 [] Right, c_1 [] Right)
+                      ])
+      $ Let ("and", Lambda "b" $ Lambda "d" $ Case (Var "b")
+                      [ (c_0 [] Right, c_0 [] Right)
+                      , (c_1 [] Right, Case (Var "d")
+                        [ (c_0 [] Right, c_0 [] Right)
+                        , (c_1 [] Right, c_1 [] Right)
+                        ])
+                      ])
+      $ Let ("nandD", Observe "nandD" Wrong $ Lambda "d" $ Case (Var "d")
+                [ ( c_3 ["p","q"] Right
+                  , Let ("nb",Apply (Var "not") "p")
+                  $ Let ("nd",Apply (Var "not") "q")
+                  $ Apply (Apply (Var "and") "nb") "nd")])
+      $ Let ("x", c_3 ["false", "true"] Right)
+      $ Apply (Var "nandD") "x"
 
 --------------------------------------------------------------------------------
 -- Counter examples found with QuickCheck

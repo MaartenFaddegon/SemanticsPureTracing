@@ -148,11 +148,10 @@ reduce (Observe l jmt e) = do
   doTrace (RootEvent uid l)
   eval (Observed (Parent uid 1) jmt e)
 
-reduce (Observed q jmt e) = do
+reduce (Observed p jmt e) = do
 
   j <- getUniq
-  doTrace (EnterEvent j q)
-  let p = Parent j 1
+  doTrace (EnterEvent j p)
 
   w <- eval e
   case w of

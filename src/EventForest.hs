@@ -104,7 +104,12 @@ eventsInTree frt r = reverse $ dfsFold Prefix add idVisit [] Trunk (Just r) frt
 -- Find all toplevel AppEvents for RootEvent r
 topLevelApps :: EventForest -> Event -> [Event]
 topLevelApps frt r@RootEvent{} = case dfsChildren frt r of
-  [Just ent] -> case dfsChildren frt ent of
-    [Just lam] -> case dfsChildren frt lam of [] -> []; as -> map (\(Just a) -> a) as
-    _          -> []
+  [Just (lam@LamEvent{})] -> map fromJust (filter isJustApp $ dfsChildren frt lam)
   _          -> []
+
+isJustApp :: (Maybe Event) -> Bool
+isJustApp (Just AppEvent{}) = True
+isJustApp _                 = False
+
+fromJust :: (Maybe a) -> a
+fromJust (Just x) = x

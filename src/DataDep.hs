@@ -34,30 +34,48 @@ shwCV v = (show (valLoc v) ++ "_" ++ show (valStmt v), "")
 constants :: EventForest -> Event -> [ConstantValue]
 constants frt r = dfsFold Prefix pre idVisit [] Trunk (Just r) frt
   where pre :: Visit [ConstantValue]
-        pre (Just ent) loc vs
-          | isConstantTree frt ent = mkConstantValue ent loc : vs
-          | otherwise              = vs
-        pre _          _   vs      = vs
+        pre (Just e) loc vs
+          | isConstantTree e  = mkConstantValue e loc : vs
+          | otherwise         = vs
+        pre _          _   vs = vs
 
-        mkConstantValue :: Event -> Location -> ConstantValue
-        mkConstantValue e loc = let us = treeUIDs frt e
-                          in ConstantValue (eventUID . findApp $ e) loc (minimum us) (maximum us)
+        mkConstantValue e loc = ConstantValue (eventUID . findApp $ e) loc
+                                              (eventUID . enterEventOf frt $ e) (eventUID e) 
+
+        -- mkConstantValue :: Event -> Location -> ConstantValue
+        -- mkConstantValue e loc = let us = treeUIDs frt e
+        --                   in ConstantValue (eventUID . findApp $ e) loc (minimum us) (maximum us)
+
 
         apps :: [Event]
         apps = topLevelApps frt r
 
         findApp :: Event -> Event
-        findApp e = head $ filter (\a -> e `elem` (eventsInTree frt a)) apps
+        findApp e = let err = "event " ++ show e ++ " is not in any of the subtrees of " ++ show apps
+                    in safeHead err $ filter (\a -> e `elem` (eventsInTree frt a)) apps
 
+safeHead :: String -> [a] -> a
+safeHead msg [] = error msg
+safeHead _   xs = head xs
 
--- Is given event the root of a (sub)tree describing a constant value?
--- Note that root must be an EnterEvent.
-isConstantTree :: EventForest -> Event -> Bool
-isConstantTree frt ent = case ent of 
-  EnterEvent{} -> case head $ dfsChildren frt ent of
-    (Just ConstEvent{}) -> True
-    _                   -> False
-  _            -> False
+isConstantTree :: Event -> Bool
+isConstantTree ConstEvent{} = True
+isConstantTree _            = False
+
+enterEventOf :: EventForest -> Event -> Event
+enterEventOf frt e = case filter isEnter siblings of [ent] -> ent
+
+  where p :: Parent
+        p = eventParent e
+
+        siblings :: [Event]
+        siblings = map snd $ filter ((==(parentPosition p)) . fst)
+                           $ case lookup (parentUID p) frt of (Just s) -> s
+
+        isEnter :: Event -> Bool
+        isEnter EnterEvent{} = True
+        isEnter _            = False
+
 --------------------------------------------------------------------------------
 -- Dynamic Data Dependency Tree
 
