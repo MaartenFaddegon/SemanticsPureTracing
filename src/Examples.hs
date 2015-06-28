@@ -526,6 +526,31 @@ ex11a = {- import -} prelude
       $ Let ("x", c_3 ["false", "true"] Right)
       $ Apply (Var "nandD") "x"
 
+-- Simpler program with non nullary constructors
+--
+-- data D = D Bool
+--
+-- not = observe "not" not'
+-- not' True  = False
+-- not' False = True
+-- 
+-- notD = observe "notD" notD'
+-- notD' (D b) = D (not b)
+--
+ex11b = {- import -} prelude
+      $ Let ("true", c_1 [] Right)
+      $ Let ("false", c_0 [] Right)
+      $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                      [ (c_1 [] Right, c_0 [] Right)
+                      , (c_0 [] Right, c_1 [] Right)
+                      ])
+      $ Let ("notD", Observe "notD" Wrong $ Lambda "d" $ Case (Var "d")
+                [ ( c_3 ["b"] Right
+                  , Let ("nb",Apply (Var "not") "b")
+                  $ c_3 ["nb"] Right)])
+      $ Let ("k", c_3 ["false"] Right)
+      $ Print $ Apply (Var "notD") "k"
+
 --------------------------------------------------------------------------------
 -- Counter examples found with QuickCheck
 
