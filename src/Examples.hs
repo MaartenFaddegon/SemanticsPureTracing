@@ -440,15 +440,15 @@ ex9c = {- import -} prelude
      $ Let ("k2", c_3 ["false", "k1"] Right)
      $ {- main= -} Let ("ys", Apply (Var "mapNot") "k2") $ Apply (Var "all") "ys"
 
--- map and not observed, not is faulty (always returns True)
+-- map and not observed
 ex9d :: Expr
 ex9d = {- import -} prelude
      $ {- import -} mapTraced'
      $ {- import -} myAnd
      $ Let ("true", c_1 [] Right)
      $ Let ("false", c_0 [] Right)
-     $ Let ("not", Observe "not" Wrong $ Lambda "b"$ Case (Var "b")
-                             [ (c_1 [] Right, c_1 [] Right)
+     $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                             [ (c_1 [] Right, c_0 [] Right)
                              , (c_0 [] Right, c_1 [] Right)
                              ])
      $ Let ("mapNot", Lambda "xs" $ Apply (Apply (Var "mapT") "not") "xs")
