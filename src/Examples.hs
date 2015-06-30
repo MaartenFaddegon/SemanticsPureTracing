@@ -489,6 +489,58 @@ ex10a = {- import -} prelude
                 $ Apply (Apply (Var "and") "nb") "nd")
       $ Apply (Apply (Var "nand") "false") "true"
 
+-- as 10a but with and also observed
+ex10b :: Expr
+ex10b = {- import -} prelude
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+      $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                      [ (c_1 [] Right, c_0 [] Right)
+                      , (c_0 [] Right, c_1 [] Right)
+                      ])
+      $ Let ("and", Observe "and" Right $ Lambda "b"$ Lambda "d"
+                  $ Case (Var "b")
+                      [ (c_0 [] Right, c_0 [] Right)
+                      , (c_1 [] Right, Case (Var "d")
+                        [ (c_0 [] Right, c_0 [] Right)
+                        , (c_1 [] Right, c_1 [] Right)
+                        ])
+                      ])
+      $ Let ("nand", Observe "nand" Right $ Lambda "b"$ Lambda "d"
+                $ Let ("nb",Apply (Var "not") "b")
+                $ Let ("nd",Apply (Var "not") "d")
+                $ Apply (Apply (Var "and") "nb") "nd")
+      $ Apply (Apply (Var "nand") "false") "true"
+
+-- program with multi-argument functions:
+--   not = observe "not" not'
+--   not' True  = False
+--   not' False = True
+--   
+--   and = observe "and" and
+--   and' b True  = not b
+--   and' b False = False
+--   
+--   nand = observe "nand" nand'
+--   nand' b d = and b (not d)
+ex10c :: Expr
+ex10c = {- import -} prelude
+     $ Let ("true", c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+      $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                      [ (c_1 [] Right, c_0 [] Right)
+                      , (c_0 [] Right, c_1 [] Right)
+                      ])
+      $ Let ("and", Observe "and" Right $ Lambda "b"$ Lambda "d"
+                  $ Case (Var "d")
+                      [ (c_0 [] Right, c_0 [] Right)
+                      , (c_1 [] Right, Apply (Var "not") "b")
+                      ])
+      $ Let ("nand", Observe "nand" Right $ Lambda "b"$ Lambda "d"
+                $ Let ("nd",Apply (Var "not") "d")
+                $ Apply (Apply (Var "and") "b") "nd")
+      $ Apply (Apply (Var "nand") "false") "false"
+
 
 -- program with non nullary constructors
 --
