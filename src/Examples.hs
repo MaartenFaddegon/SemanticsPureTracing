@@ -539,7 +539,7 @@ ex10c = {- import -} prelude
       $ Let ("nand", Observe "nand" Right $ Lambda "b"$ Lambda "d"
                 $ Let ("nd",Apply (Var "not") "d")
                 $ Apply (Apply (Var "and") "b") "nd")
-      $ Apply (Apply (Var "nand") "false") "false"
+      $ Apply (Apply (Var "nand") "true") "false"
 
 
 -- program with non nullary constructors
