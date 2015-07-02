@@ -130,7 +130,7 @@ mkResDepTree ddt = Graph (root ddt)
         isResult :: Location -> Bool
         isResult Trunk          = True
         isResult (ResultOf l)   = isResult l
-        isResult (ArgumentOf _) = False
+        isResult (ArgumentOf l) = not (isResult l)
         isResult (FieldOf _ l)  = isResult l
 
 type CVStack = [ConstantValue]

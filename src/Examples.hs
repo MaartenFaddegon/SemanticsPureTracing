@@ -296,6 +296,46 @@ ex7e = Let ("true",  c_1 [] Right)
      $ Let ("neg", Observe "neg" Right $ Lambda "b" (Apply (Var "appT") "not"))
      $ {-in-} Apply (Var "neg") "false"
 
+-- ex7f: more higher order functions, or
+-- a function taking as argument a function taking as argument a function
+--
+-- appN = observe "appN" appN'
+-- appN' g = g not
+--
+-- appT = observe "appT" appT'
+-- appT' f = f True
+-- 
+-- not = observe "not" not'
+-- not' True  = False
+-- not' False = True
+
+ex7f :: Expr
+ex7f = Let ("true",  c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+     $ Let ("not",  Observe "not"  Right $ Lambda "b" $ Case (Var "b") 
+               [(c_1 [] Right, c_0 [] Right)
+               , (c_0 [] Right, c_1 [] Right)]
+           )
+     $ Let ("appT", Observe "appT" Right $ Lambda "f" $ Apply (Var "f") "true")
+     $ Let ("appN", Observe "appN" Right $ Lambda "g" $ Apply (Var "g") "not")
+     $ Let ("neg", Observe "neg" Right $ Lambda "b" $ (Apply (Var "appN") "appT"))
+     $ {-in-} Apply (Var "neg") "false"
+
+
+-- As ex7f, but appN is not observed
+ex7g :: Expr
+ex7g = Let ("true",  c_1 [] Right)
+     $ Let ("false", c_0 [] Right)
+     $ Let ("not",  Observe "not"  Right $ Lambda "b" $ Case (Var "b") 
+               [(c_1 [] Right, c_0 [] Right)
+               , (c_0 [] Right, c_1 [] Right)]
+           )
+     $ Let ("appT", Observe "appT" Right $ Lambda "f" $ Apply (Var "f") "true")
+     $ Let ("appN", Lambda "g" $ Apply (Var "g") "not")
+     $ Let ("neg", Observe "neg" Right $ Lambda "b" $ (Apply (Var "appN") "appT"))
+     $ {-in-} Apply (Var "neg") "false"
+
+
 -- Example 8: How does our technique handle sharing?
 
 -- How does re-use of the result of "f" affect our dependence inference?
@@ -602,6 +642,47 @@ ex11b = {- import -} prelude
                   $ c_3 ["nb"] Right)])
       $ Let ("k", c_3 ["false"] Right)
       $ Print $ Apply (Var "notD") "k"
+
+
+
+-- Examples with exceptions.
+
+-- ex12a: a simple example
+ex12a = {- import -} prelude
+      $ Let ("true", c_1 [] Right)
+      $ Let ("false", c_0 [] Right)
+      $ Let ("not", Observe "not" Right $ Lambda "b"$ Case (Var "b")
+                      [ (c_1 [] Right, c_0 [] Right)
+                         -- no definition for "not False" --> throws exception
+                      ])
+      $ Print $ Apply (Var "not") "false"
+
+-- and = observe "and" and'
+-- and' True  True  = True
+-- and' True  False = False
+-- -- No definition for False b -> throws exception!
+--
+-- foldl = observe "foldl" foldl'
+-- foldl' f z []    = z
+-- foldl' f z (h:t) = let z' = f z h in foldl f z' t
+--
+-- all = foldl and True []
+--
+-- main = all [False, True]
+{-
+ex12b = Let ("foldl", Observe "not" Right (Var "foldl'"))
+      $ Let ("foldl'", Lambda "f" $ Lambda "z"  $ Lambda "xs"
+                    $ Case (Var "xs")
+                         [ (c_2 [] Right, Var "z")
+                         , ( c_3 ["h","t"] Right
+                           , Let ("z'", Apply (Apply (Var "f") "z") "h")
+                           $ Apply (Apply (Apply (Var "foldl") "f") "z'") "t"
+                           )
+                         ])
+      $ Let ("and", Lambda "b" $ Lambda "d" $ Case (Var "b")
+                      [ (c_0 [] Right, c_0 [] Right)
+                      , (c_1 [] Right, Case (Var "d")
+-}
 
 --------------------------------------------------------------------------------
 -- Counter examples found with QuickCheck

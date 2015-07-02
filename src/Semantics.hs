@@ -29,10 +29,11 @@ deriving instance Typeable Judgement
 
 type Label    = String
 
-data ConstrId = ConstrId Int 
+data ConstrId = ConstrId Int | ExceptionRepr String
               deriving (Eq,Ord,Data,Typeable)
 
 instance Show ConstrId where show (ConstrId i) = "c_" ++ show i
+                             show (ExceptionRepr s) = "<Exception: " ++ s ++ ">"
 
 --------------------------------------------------------------------------------
 -- The state
@@ -133,8 +134,7 @@ reduce (Apply f x) = do
   case e of 
     (Lambda y e')  -> eval (subst y x e')
     Exception msg -> return (Exception msg)
-    _             -> do doLog "Attempt to apply non-Lambda!"
-                        doLog (show e)
+    _             -> do doLog $ "Attempt to apply non-Lambda expression '" ++ show e ++ "'"
                         return (Exception "Apply non-Lambda?")
 
 reduce (Var x) = do
@@ -155,7 +155,10 @@ reduce (Observed p jmt e) = do
 
   w <- eval e
   case w of
-    Exception msg ->
+    -- MF TODO: Should we add an ObsE rule to the paper?
+    Exception msg -> do
+      i <- getUniq
+      doTrace (ConstEvent i p (ExceptionRepr msg) 0 Wrong)
       return (Exception msg)
 
     -- ObsC rule in paper
@@ -167,7 +170,7 @@ reduce (Observed p jmt e) = do
       eval $ foldl (\e' (m,n,k) -> Let (m, Observed (Parent i k) jmt (Var n)) e')
                    (Constr s ms jmt') (zip3 ms ns [1..])
 
-    -- ObsL rule in paper
+    -- ObsLam rule in paper
     (Lambda x e') -> do
       i <- getUniq
       doTrace (LamEvent i p)
