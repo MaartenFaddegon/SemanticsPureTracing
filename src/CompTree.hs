@@ -65,7 +65,7 @@ mkStmt' frt (e@(AppEvent{})) = CompStmt "??" i repr j
               pre Nothing                         _ = (++" _")
               pre (Just EnterEvent{})             _ = id
               pre (Just RootEvent{eventLabel=l})  _ = (++l)
-              pre (Just ConstEvent{eventRepr=r})  _ = (++" ("++show r)
+              pre (Just ConstEvent{eventRepr=r,eventJudgement=j})  _ = (++(if j == Right then " +" else " -") ++ "("++show r)
               pre (Just LamEvent{})               _ = (++" {")
               pre (Just AppEvent{})               _ = (++" ->")
               post Nothing                        _ = id
@@ -76,21 +76,22 @@ mkStmt' frt (e@(AppEvent{})) = CompStmt "??" i repr j
               post (Just AppEvent{})              _ = id
 
               j :: Judgement
-              j = judgeApp frt e
+              j = judgement frt (Just e)
 
-judgeApp :: EventForest -> Event -> Judgement
-judgeApp frt a@AppEvent{} = case (allRight arg, allRight res) of
-        (True, False) -> Wrong
-        (False,_)     -> Right
-        (True, True)  -> Right
-
-  where [arg,res] = dfsChildren frt a
-
-        allRight :: Maybe Event -> Bool
-        allRight = (all (\e -> Right == eventJudgement e)) . (constList frt)
-
-constList :: EventForest -> Maybe Event -> [Event]
-constList _   Nothing  = []
-constList frt (Just e) = filter isConst (eventsInTree frt e)
-  where isConst ConstEvent{} = True
-        isConst _            = False
+judgement :: EventForest -> Maybe Event -> Judgement
+judgement frt Nothing                                       = Right
+judgement frt (Just e@ConstEvent{})
+  | eventJudgement e == Wrong                               = Wrong -- wrong at top
+  | all (==Right) (map (judgement frt) $ dfsChildren frt e) = Right
+  | otherwise                                               = Wrong -- wrong component
+judgement frt (Just e@LamEvent{})
+  | all (==Right) (map (judgement frt) $ dfsChildren frt e) = Right
+  | otherwise                                               = Wrong
+judgement frt (Just e@AppEvent{})
+  | jarg == Wrong                                           = Right
+  | jarg == Right && jres == Right                          = Right
+  | jarg == Right && jres == Wrong                          = Wrong
+  where 
+  [arg,res] = dfsChildren frt e
+  jarg = judgement frt arg
+  jres = judgement frt res

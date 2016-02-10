@@ -92,7 +92,7 @@ showVertex v = (showVertex' v, "")
 
 showVertex' :: Vertex -> String
 showVertex' RootVertex  = "Root"
-showVertex' (Vertex c) = "\"" ++ stmtRepr c ++ "\""
+showVertex' (Vertex c) = "\"" ++ stmtRepr c ++ " " ++ show (stmtJudgement c) ++ "\""
 
 showCompStmt :: CompStmt -> String
 showCompStmt (CompStmt _ i r j) = r

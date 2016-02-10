@@ -154,8 +154,9 @@ reduce (Observed p jmt e) = do
   doTrace (EnterEvent j p)
 
   w <- eval e
+
   case w of
-    -- MF TODO: Should we add an ObsE rule to the paper?
+    -- In the paper an exceptions is just a constructor.
     Exception msg -> do
       i <- getUniq
       doTrace (ConstEvent i p (ExceptionRepr msg) 0 Wrong)

@@ -201,6 +201,10 @@ ex5c = Let ("mod2",    Observe "mod2"    Right (Lambda "x" $ Var "x"))
 traceEx5c :: Trace
 traceEx5c = reverse . snd . evaluate $ ex5c
 
+ex5d :: Expr
+ex5d = Let ("k", c_1 [] Right)
+       $ Print $ Apply (Observe "f" Right $ Lambda "y" $ Apply (Observe "g" Wrong $ Lambda "x" $ Var "x") "y") "k"
+
 -- Example 6:
 --  There are different computation trees that are sound for algorithmic
 --  debugging. Functions as arguments can be represented in different ways
@@ -740,6 +744,10 @@ cex2 = Let ("h",Observe "h" Right
                             )
                 )
            ) (Apply (Var "h") "h")
+
+cex3 :: Expr
+cex3 = Let ("p",Lambda "h" (Apply (Observe "X" Wrong (Lambda "p" (c_3 ["h","p"] Right))) "p")) 
+           (Apply (Apply (Observe "L" Right (Lambda "m" (Lambda "q" (Apply (Var "q") "m")))) "p") "p")
 
 --------------------------------------------------------------------------------
 -- Prelude, with:
