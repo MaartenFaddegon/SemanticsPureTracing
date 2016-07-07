@@ -27,13 +27,35 @@ validExpr :: Expr -> Bool
 validExpr expr = hasNoFreeVars expr && reducesToConstr r && nonEmptyTrace r
   where r = red expr
 
+
+-- A labelled expression that algorithmic debugging finds faulty actually
+-- contains a defect.
 prop_actuallyFaulty :: Expr -> Property
 prop_actuallyFaulty e = 
   validExpr e ==>
-   property (actuallyFaulty e) 
+  property (actuallyFaulty e) 
 
 actuallyFaulty :: Expr -> Bool
 actuallyFaulty e = algoDebug e `subsetOf` markedFaulty e
+
+-- For every request event there is exactly one response event and vice versa.
+prop_eventSpans e = validExpr e ==> all (formsSpan trc) trc
+ where trc = getTrace (red e)
+
+formsSpan trc e | isReq  e  = length es == 2 && isResp (es !! 0)
+                | isResp e  = length es == 2 && isReq  (es !! 1)
+                | otherwise = True -- other events (e.g. RootEvent) don't form spans
+ where es = filter (hasParent (eventParent e)) trc
+
+hasParent p RootEvent{} = False
+hasParent p e           = eventParent e == p
+
+isReq EnterEvent{} = True
+isReq _            = False
+
+isResp ConstEvent{} = True
+isResp LamEvent{}   = True
+isResp _            = False
 
 --------------------------------------------------------------------------------
 -- Generating random expressions with observed abstractions
@@ -118,11 +140,12 @@ instance Arbitrary Expr where
 -- Main
 
 main :: IO ()
-main = quickCheckWith args prop_actuallyFaulty
+main = check 10000 300 prop_actuallyFaulty
 
+check n m prop = quickCheckWith args prop
   where args = Args { replay          = Nothing
-                    , maxSuccess      = 10000    -- number of tests
+                    , maxSuccess      = n        -- number of tests
                     , maxDiscardRatio = 1000000  -- many random exprs will not be valid
-                    , maxSize         = 300       -- max subexpressions
+                    , maxSize         = m        -- max subexpressions
                     , chatty          = True
                     }

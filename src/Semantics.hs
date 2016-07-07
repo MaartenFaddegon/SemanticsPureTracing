@@ -24,16 +24,19 @@ data Expr = Lambda     Name Expr
           | Exception  String
           deriving (Show,Eq,Data,Typeable)
 
+deriving instance Data AssistedMessage
+deriving instance Typeable AssistedMessage
+
 deriving instance Data Judgement
 deriving instance Typeable Judgement
 
 type Label    = String
 
 data ConstrId = ConstrId Int | ExceptionRepr String
-              deriving (Eq,Ord,Data,Typeable)
+              deriving (Eq,Ord,Data,Typeable,Show)
 
-instance Show ConstrId where show (ConstrId i) = "c_" ++ show i
-                             show (ExceptionRepr s) = "<Exception: " ++ s ++ ">"
+-- instance Show ConstrId where show (ConstrId i) = "c_" ++ show i
+--                              show (ExceptionRepr s) = "<Exception: " ++ s ++ ">"
 
 --------------------------------------------------------------------------------
 -- The state
