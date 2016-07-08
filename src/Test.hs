@@ -2,6 +2,7 @@ import Semantics
 import Examples
 import Run
 import FreeVar
+import CompTree
 
 import Prelude hiding (Right)
 import Data.Graph.Libgraph
@@ -23,22 +24,41 @@ reducesToConstr r = case getReduct r of (Constr _ _ _) -> True; _ -> False
 hasNoFreeVars :: Expr -> Bool
 hasNoFreeVars expr = freeVars expr == NoFreeVar
 
-validExpr :: Expr -> Bool
-validExpr expr = reducesToConstr r && nonEmptyTrace r
+wellFormed :: Expr -> Bool
+wellFormed expr = reducesToConstr r && nonEmptyTrace r
   where r = red expr
 
--- A labelled expression that algorithmic debugging finds faulty actually
--- contains a defect.
+-- A labelled expression that algorithmic debugging finds faulty 
+-- actually contains a defect.
 prop_actuallyFaulty :: Expr -> Property
 prop_actuallyFaulty e = 
-  hasNoFreeVars e && validExpr e ==>
-  property (actuallyFaulty e) 
+  hasNoFreeVars e && wellFormed e ==> algoDebug e `subsetOf` markedFaulty e
 
-actuallyFaulty :: Expr -> Bool
-actuallyFaulty e = algoDebug e `subsetOf` markedFaulty e
+prop_minimal :: Expr -> Property
+prop_minimal e =
+ wellFormed e ==> all (\c -> length (parent c) <= 1) (statements tree)
+ where
+ tree = getCompTree (red e)
+ parent = predCache tree
+ statements = vertices
+
+prop_reachable :: Expr -> Property
+prop_reachable e =
+ wellFormed e ==> lbl $ all parentAlsoWrong wrongStatements
+ where
+ parentAlsoWrong c = case parent c of
+  []  -> True
+  [p] -> isWrong p
+ wrongStatements = filter isWrong (statements tree)
+ tree = getCompTree (red e)
+ parent = predCache tree
+ statements = vertices
+ isWrong RootVertex = True
+ isWrong (Vertex c) = stmtJudgement c == Wrong
+ lbl = label $ " where computation tree has depth " ++ (show . treeDepth $ tree)
 
 -- For every request event there is exactly one response event and vice versa.
-prop_eventSpans e = validExpr e ==> lbl $ all (formsSpan trc) trc
+prop_eventSpans e = wellFormed e ==> lbl $ all (formsSpan trc) trc
  where trc = getTrace (red e)
        lbl = label $ (show . length $ trc) ++ " events in the trace"
 
@@ -51,8 +71,8 @@ formsSpan trc e | isReq  e  = length es == 2 && isResp (es !! 0)
 -- http://link.springer.com/chapter/10.1007/978-1-4612-1844-9_24#page-1
 
 prop_balanced e = 
- validExpr e ==> numLeft trc == numRight trc 
-                 && all (\prefix -> numLeft prefix >= numRight prefix) (prefixes trc)
+ wellFormed e ==> numLeft trc == numRight trc 
+                  && all (\prefix -> numLeft prefix >= numRight prefix) (prefixes trc)
  where trc = reverse $ getTrace (red e)
 
 prefixes :: [a] -> [[a]]
