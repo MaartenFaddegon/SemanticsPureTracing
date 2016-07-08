@@ -3,7 +3,7 @@ module Semantics where
 
 import Prelude hiding (Right)
 import Control.Monad.State
-import Data.Graph.Libgraph hiding (depth)
+import Data.Graph.Libgraph
 import Data.Data hiding (Infix,Prefix)
 
 --------------------------------------------------------------------------------

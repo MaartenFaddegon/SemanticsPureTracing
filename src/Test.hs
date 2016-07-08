@@ -12,66 +12,34 @@ import Control.Monad.State
 --------------------------------------------------------------------------------
 -- QuickCheck soundness property
 
-subsetOf :: Ord a => [a] -> [a] -> Bool
-subsetOf xs ys = all (flip elem ys) xs
-
-nonEmptyTrace :: Reduct -> Bool
-nonEmptyTrace = not . null . getTrace
-
-reducesToConstr :: Reduct -> Bool
-reducesToConstr r = case getReduct r of (Constr _ _ _) -> True; _ -> False
-
-hasNoFreeVars :: Expr -> Bool
-hasNoFreeVars expr = freeVars expr == NoFreeVar
-
-wellFormed :: Expr -> Bool
-wellFormed expr = reducesToConstr r && nonEmptyTrace r
-  where r = red expr
-
--- A labelled expression that algorithmic debugging finds faulty 
--- actually contains a defect.
-prop_actuallyFaulty :: Expr -> Property
-prop_actuallyFaulty e = 
-  hasNoFreeVars e && wellFormed e ==> algoDebug e `subsetOf` markedFaulty e
-
-prop_minimal :: Expr -> Property
-prop_minimal e =
- wellFormed e ==> all (\c -> length (parent c) <= 1) (statements tree)
- where
- tree = getCompTree (red e)
- parent = predCache tree
- statements = vertices
-
-prop_reachable :: Expr -> Property
-prop_reachable e =
- wellFormed e ==> lbl $ all parentAlsoWrong wrongStatements
- where
- parentAlsoWrong c = case parent c of
-  []  -> True
-  [p] -> isWrong p
- wrongStatements = filter isWrong (statements tree)
- tree = getCompTree (red e)
- parent = predCache tree
- statements = vertices
- isWrong RootVertex = True
- isWrong (Vertex c) = stmtJudgement c == Wrong
- lbl = label $ " where computation tree has depth " ++ (show . treeDepth $ tree)
+--------------------------------------------------
 
 -- For every request event there is exactly one response event and vice versa.
-prop_eventSpans e = wellFormed e ==> lbl $ all (formsSpan trc) trc
+prop_eventSpans e = wellFormed e ==> lbl_trcLen trc $ all (formsSpan trc) trc
  where trc = getTrace (red e)
-       lbl = label $ (show . length $ trc) ++ " events in the trace"
 
 formsSpan trc e | isReq  e  = length es == 2 && isResp (es !! 0)
                 | isResp e  = length es == 2 && isReq  (es !! 1)
                 | otherwise = True -- other events (e.g. RootEvent) don't form spans
  where es = filter (hasParent (eventParent e)) trc
 
+isReq EnterEvent{} = True
+isReq _            = False
+
+isResp ConstEvent{} = True
+isResp LamEvent{}   = True
+isResp _            = False
+
+hasParent p RootEvent{} = False
+hasParent p e           = eventParent e == p
+
+--------------------------------------------------
+-- Request and response events are like the language of balanced parentheses.
 -- Automata and Computability, Chapter: Balanced Parentheses, Dexter C. Kozen
 -- http://link.springer.com/chapter/10.1007/978-1-4612-1844-9_24#page-1
 
 prop_balanced e = 
- wellFormed e ==> numLeft trc == numRight trc 
+ wellFormed e ==> lbl_trcLen trc $ numLeft trc == numRight trc 
                   && all (\prefix -> numLeft prefix >= numRight prefix) (prefixes trc)
  where trc = reverse $ getTrace (red e)
 
@@ -84,15 +52,83 @@ numLeft,numRight :: [Event] -> Int
 numLeft  = length . (filter isReq)
 numRight = length . (filter isResp)
 
-hasParent p RootEvent{} = False
-hasParent p e           = eventParent e == p
+--------------------------------------------------
+-- A labelled expression that algorithmic debugging finds faulty 
+-- actually contains a defect.
 
-isReq EnterEvent{} = True
-isReq _            = False
+prop_actuallyFaulty :: Expr -> Property
+prop_actuallyFaulty e = 
+ hasNoFreeVars e && wellFormed e ==> lbl_tree tree $ algoDebug e `subsetOf` markedFaulty e
+ where
+ tree = getCompTree (red e)
 
-isResp ConstEvent{} = True
-isResp LamEvent{}   = True
-isResp _            = False
+subsetOf :: Ord a => [a] -> [a] -> Bool
+subsetOf xs ys = all (flip elem ys) xs
+
+--------------------------------------------------
+-- A computation tree has no surplus edges: every statement has a unique parent.
+
+prop_minimal :: Expr -> Property
+prop_minimal e =
+ wellFormed e ==> lbl_tree tree $ all (\c -> length (parent c) <= 1) (statements tree)
+ where
+ tree = getCompTree (red e)
+ parent = predCache tree
+ statements = vertices
+
+--------------------------------------------------
+-- All computation statements are reachable from the root.
+
+prop_connected :: Expr -> Property
+prop_connected e =
+ wellFormed e ==> lbl_tree tree $ all hasParent (filter (/= RootVertex) (statements tree))
+ where
+ tree = getCompTree (red e)
+ hasParent = (not . null . parent)
+ parent = predCache tree
+ statements = vertices
+
+--------------------------------------------------
+-- A wrong statement is reachable from the special root statement * 
+-- via a chain of wrong statements.
+prop_reachable :: Expr -> Property
+prop_reachable e =
+ wellFormed e ==> lbl_tree tree $ all parentWrong (filter isWrong (statements tree))
+ where
+ parentWrong c = case parent c of
+  []  -> True
+  [p] -> isWrong p
+ tree = getCompTree (red e)
+ parent = predCache tree
+ statements = vertices
+ isWrong RootVertex = True
+ isWrong (Vertex c) = stmtJudgement c == Wrong
+
+--------------------------------------------------
+
+lbl_trcLen trc = label $ (show . length $ trc) ++ " events in the trace"
+
+lbl_tree tree = lbl_treeDepth tree . lbl_statements tree
+
+lbl_treeDepth tree = label $ "computation tree has depth " ++ (show . treeDepth $ tree)
+
+lbl_statements tree = label $ (show . length . vertices $ tree) ++ " computation statements"
+
+--------------------------------------------------
+-- preconditions
+
+hasNoFreeVars :: Expr -> Bool
+hasNoFreeVars expr = freeVars expr == NoFreeVar
+
+wellFormed :: Expr -> Bool
+wellFormed expr = reducesToConstr r && nonEmptyTrace r
+  where r = red expr
+
+nonEmptyTrace :: Reduct -> Bool
+nonEmptyTrace = not . null . getTrace
+
+reducesToConstr :: Reduct -> Bool
+reducesToConstr r = case getReduct r of (Constr _ _ _) -> True; _ -> False
 
 --------------------------------------------------------------------------------
 -- Generating random expressions with observed abstractions
@@ -177,7 +213,22 @@ instance Arbitrary Expr where
 -- Main
 
 main :: IO ()
-main = check 10000 300 prop_actuallyFaulty
+main = (flip mapM_) tests (\(prop,description) -> do
+ putStrLn description
+ check 5 300 prop
+ putStrLn "")
+ 
+
+-- check 10000 300 prop_actuallyFaulty
+
+ where 
+ tests = [(prop_eventSpans, "For every request event there is exactly one response event and vice versa."),
+  (prop_balanced, "Request and response events are like the language of balanced parentheses."),
+  (prop_actuallyFaulty, "A labelled expression that algorithmic debugging finds faulty actually contains a defect."),
+  (prop_reachable, "A wrong statement is reachable from the special root statement * via a chain of wrong statements."),
+  (prop_connected, "All computation statements are reachable from the root."),
+  (prop_minimal, "Our computation tree has no surplus edges: every statement has a unique parent.")
+  ]
 
 check n m prop = quickCheckWith args prop
   where args = Args { replay          = Nothing
