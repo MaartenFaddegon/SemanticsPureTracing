@@ -24,28 +24,45 @@ hasNoFreeVars :: Expr -> Bool
 hasNoFreeVars expr = freeVars expr == NoFreeVar
 
 validExpr :: Expr -> Bool
-validExpr expr = hasNoFreeVars expr && reducesToConstr r && nonEmptyTrace r
+validExpr expr = reducesToConstr r && nonEmptyTrace r
   where r = red expr
-
 
 -- A labelled expression that algorithmic debugging finds faulty actually
 -- contains a defect.
 prop_actuallyFaulty :: Expr -> Property
 prop_actuallyFaulty e = 
-  validExpr e ==>
+  hasNoFreeVars e && validExpr e ==>
   property (actuallyFaulty e) 
 
 actuallyFaulty :: Expr -> Bool
 actuallyFaulty e = algoDebug e `subsetOf` markedFaulty e
 
 -- For every request event there is exactly one response event and vice versa.
-prop_eventSpans e = validExpr e ==> all (formsSpan trc) trc
+prop_eventSpans e = validExpr e ==> lbl $ all (formsSpan trc) trc
  where trc = getTrace (red e)
+       lbl = label $ (show . length $ trc) ++ " events in the trace"
 
 formsSpan trc e | isReq  e  = length es == 2 && isResp (es !! 0)
                 | isResp e  = length es == 2 && isReq  (es !! 1)
                 | otherwise = True -- other events (e.g. RootEvent) don't form spans
  where es = filter (hasParent (eventParent e)) trc
+
+-- Automata and Computability, Chapter: Balanced Parentheses, Dexter C. Kozen
+-- http://link.springer.com/chapter/10.1007/978-1-4612-1844-9_24#page-1
+
+prop_balanced e = 
+ validExpr e ==> numLeft trc == numRight trc 
+                 && all (\prefix -> numLeft prefix >= numRight prefix) (prefixes trc)
+ where trc = reverse $ getTrace (red e)
+
+prefixes :: [a] -> [[a]]
+prefixes [] = []
+prefixes xs = ys : prefixes ys 
+ where ys = init xs
+
+numLeft,numRight :: [Event] -> Int
+numLeft  = length . (filter isReq)
+numRight = length . (filter isResp)
 
 hasParent p RootEvent{} = False
 hasParent p e           = eventParent e == p

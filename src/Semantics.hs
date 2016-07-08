@@ -81,8 +81,8 @@ eval :: (Expr -> State Context Expr)
 eval expr = do 
   n <- gets reductionCount
   modify $ \s -> s {reductionCount = n+1}
-  if n > 1000
-    then return (Exception "Giving up after 1000 reductions.")
+  if n > 5000
+    then return (Exception "Giving up after 5000 reductions.")
     else do
         d <- gets depth
         modify $ \cxt -> cxt{depth=d+1}
