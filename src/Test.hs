@@ -12,8 +12,9 @@ import Control.Monad.State
 --------------------------------------------------------------------------------
 -- QuickCheck soundness property
 
---------------------------------------------------
 
+
+--------------------------------------------------
 -- For every request event there is exactly one response event and vice versa.
 prop_eventSpans e = wellFormed e ==> lbl_trcLen trc $ all (formsSpan trc) trc
  where trc = getTrace (red e)
@@ -53,11 +54,27 @@ numLeft  = length . (filter isReq)
 numRight = length . (filter isResp)
 
 --------------------------------------------------
+-- Request and corresponding response event have the same parent.
+
+prop_parentBalanced e = wellFormed e ==> lbl_trcLen trc $ parse trc []
+ where trc = reverse $ getTrace (red e)
+
+parse :: Trace -> [Event] -> Bool
+parse [] stk = stk == []
+parse (t:trc) stk 
+ | isReq  t  = parse trc (t:stk)
+ | isResp t  = case stk of []        -> False
+                           (t':stk') -> sameParent t t' && parse trc stk'
+ | otherwise = parse trc stk
+
+sameParent t t' = eventParent t == eventParent t'
+
+--------------------------------------------------
 -- A labelled expression that algorithmic debugging finds faulty 
 -- actually contains a defect.
 
-prop_actuallyFaulty :: Expr -> Property
-prop_actuallyFaulty e = 
+prop_sound :: Expr -> Property
+prop_sound e = 
  hasNoFreeVars e && wellFormed e ==> lbl_tree tree $ algoDebug e `subsetOf` markedFaulty e
  where
  tree = getCompTree (red e)
@@ -66,7 +83,7 @@ subsetOf :: Ord a => [a] -> [a] -> Bool
 subsetOf xs ys = all (flip elem ys) xs
 
 --------------------------------------------------
--- A computation tree has no surplus edges: every statement has a unique parent.
+-- A computation tree has no surplus dependencies: every statement has a unique parent.
 
 prop_minimal :: Expr -> Property
 prop_minimal e =
@@ -215,19 +232,16 @@ instance Arbitrary Expr where
 main :: IO ()
 main = (flip mapM_) tests (\(prop,description) -> do
  putStrLn description
- check 5 300 prop
+ check 10000 300 prop
  putStrLn "")
- 
-
--- check 10000 300 prop_actuallyFaulty
-
  where 
  tests = [(prop_eventSpans, "For every request event there is exactly one response event and vice versa."),
   (prop_balanced, "Request and response events are like the language of balanced parentheses."),
-  (prop_actuallyFaulty, "A labelled expression that algorithmic debugging finds faulty actually contains a defect."),
+  (prop_parentBalanced, "Request and corresponding response event have the same parent."),
+  (prop_sound, "Sound for algorithmic debugging. A labelled expression that algorithmic debugging finds faulty actually contains a defect."),
   (prop_reachable, "A wrong statement is reachable from the special root statement * via a chain of wrong statements."),
   (prop_connected, "All computation statements are reachable from the root."),
-  (prop_minimal, "Our computation tree has no surplus edges: every statement has a unique parent.")
+  (prop_minimal, "Our computation tree has no surplus dependencies: every statement has a unique parent.")
   ]
 
 check n m prop = quickCheckWith args prop
