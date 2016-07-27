@@ -98,12 +98,22 @@ prop_minimal e =
 
 prop_connected :: Expr -> Property
 prop_connected e =
- wellFormed e ==> lbl_tree tree $ all hasParent (filter (/= RootVertex) (statements tree))
+ wellFormed e ==> lbl_tree tree $ all (reachableRoot []) (statements tree)
  where
  tree = getCompTree (red e)
  hasParent = (not . null . parent)
  parent = predCache tree
  statements = vertices
+
+ reachableRoot seen RootVertex = True
+ reachableRoot seen stmt | stmt `elem` seen = False
+ reachableRoot seen stmt = case parent stmt of
+  [stmt_p] -> reachableRoot (stmt:seen) stmt_p
+  _        -> False
+
+
+
+
 
 --------------------------------------------------
 -- A wrong statement is reachable from the special root statement * 
